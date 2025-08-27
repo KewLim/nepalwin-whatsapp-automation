@@ -175,43 +175,6 @@ def send_message_from_file(message_index=0):
         print(f"[INFO] Message content pasted: {message_content[:50]}...")
         time.sleep(1)  # Give time for text to be processed
         
-        # --- Configuration ---
-        image_folder = "IMAGE-TO-SEND"
-        image_extensions = ["*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.webp"]
-
-        # --- Find first image ---
-        image_path = None
-        for ext in image_extensions:
-            files = glob.glob(os.path.join(image_folder, ext))
-            if files:
-                image_path = os.path.abspath(files[0])
-                break
-
-        if not image_path:
-            print("[INFO] No image found in IMAGE-TO-SEND folder")
-        else:
-            print(f"[INFO] Found image: {image_path}")
-
-            try:
-                wait = WebDriverWait(driver, 10)
-
-                # 1️⃣ Click the attach (clip) button
-                attach_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'span[data-icon="clip"]')))
-                attach_btn.click()
-
-                # 2️⃣ Find the hidden file input directly
-                file_input = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="file"]')))
-                file_input.send_keys(image_path)
-                print(f"[INFO] Image uploaded: {os.path.basename(image_path)}")
-
-                # 3️⃣ Wait for send button and click
-                send_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'span[data-icon="send"]')))
-                send_btn.click()
-                print("[INFO] Image sent successfully!")
-
-            except Exception as e:
-                print(f"[WARNING] Could not send image: {e}")
-                
         # Send the message (press Enter)
         # message_input.send_keys(Keys.ENTER)
         print("[INFO] Message sent successfully!")
