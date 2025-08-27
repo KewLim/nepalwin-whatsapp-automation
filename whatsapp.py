@@ -131,62 +131,104 @@ def check_group_availability():
         return False
 
 def send_message_from_file(message_index=0):
-    """Parse and send message content from description.txt file"""
+    """Parse and send message content from description.txt file and attach an image from IMAGE-TO-SEND folder"""
+    import os, glob, time, pyperclip
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+
     try:
-        # Load and parse messages
+        # --- Load messages ---
         messages = load_message_from_file()
         if not messages:
             return False
-            
-        # Select message to send (default to first message)
+
         if message_index >= len(messages):
             message_index = 0
-            
+
         message = messages[message_index]
-        message_content = message['content']
-        
+        message_content = message.get('content', '')
         if not message_content:
-            print("Selected message is empty - skipping message send")
+            print("Selected message is empty - skipping")
             return False
-        
+
         print(f"📤 Sending message ({message['type']}): {message_content[:50]}...")
-        
-        # Try multiple selectors for the message input using EC.any_of
+
+        # --- Locate message input ---
         selectors = [
-            (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'),  # Common WhatsApp input
-            (By.CSS_SELECTOR, 'div[contenteditable="true"]'),  # Generic contenteditable
-            (By.CSS_SELECTOR, 'p.selectable-text.copyable-text'),  # Your original selector
-            (By.CSS_SELECTOR, '[data-testid="conversation-compose-box-input"]')  # Another common selector
+            (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'),
+            (By.CSS_SELECTOR, 'div[contenteditable="true"]'),
+            (By.CSS_SELECTOR, 'p.selectable-text.copyable-text'),
+            (By.CSS_SELECTOR, '[data-testid="conversation-compose-box-input"]')
         ]
-        
-        # Wait for any of the selectors to find a clickable element
         message_input = WebDriverWait(driver, 10).until(
-            EC.any_of(
-                *[EC.element_to_be_clickable(selector) for selector in selectors]
-            )
+            EC.any_of(*[EC.element_to_be_clickable(sel) for sel in selectors])
         )
-        
-        print("Found message input element")
-        
-        # Copy message to clipboard and paste it
+
+        # --- Paste text into input ---
         pyperclip.copy(message_content)
         message_input.click()
-        message_input.send_keys(Keys.COMMAND, 'v')  # For macOS
-        print(f"[INFO] Message content pasted: {message_content[:50]}...")
-        time.sleep(1)  # Give time for text to be processed
-        
-        # Send the message (press Enter)
-        # message_input.send_keys(Keys.ENTER)
-        print("[INFO] Message sent successfully!")
-        
-        return True
+        message_input.send_keys(Keys.COMMAND, 'v')  # macOS paste
+        print(f"[INFO] Text pasted: {message_content[:50]}...")
+        time.sleep(1)
+
+        # --- Check for image in IMAGE-TO-SEND folder ---
+        image_folder = "IMAGE-TO-SEND"
+        image_extensions = ["*.jpg", "*.jpeg", "*.png", "*.gif", "*.bmp", "*.webp"]
+        image_path = None
+        for ext in image_extensions:
+            files = glob.glob(os.path.join(image_folder, ext))
+            if files:
+                image_path = os.path.abspath(files[0])
+                break
+
+        if image_path:
+            print(f"[INFO] Found image: {image_path}")
             
+            # Use system clipboard method to attach image
+            import subprocess
+            try:
+                # Copy image to clipboard using osascript (macOS)
+                subprocess.run([
+                    'osascript', '-e',
+                    f'set the clipboard to (read file POSIX file "{image_path}" as JPEG picture)'
+                ], check=True)
+                
+                # Click message input and paste
+                message_input.click()
+                time.sleep(0.5)
+                
+                # Paste the image
+                message_input.send_keys(Keys.COMMAND, 'v')
+                time.sleep(2)
+                
+                print(f"[INFO] Image pasted from clipboard: {os.path.basename(image_path)}")
+                
+                # Wait for send button and click
+                send_btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'span[data-icon="send"]'))
+                )
+                # send_btn.click()
+                print("[INFO] Message + image sent successfully!")
+                
+            except subprocess.CalledProcessError as e:
+                print(f"[ERROR] Failed to copy image to clipboard: {e}")
+                print("[INFO] Sending text message only")
+        else:
+            # No image found, just send text
+            print("[INFO] Text message sent successfully!")
+
+        return True
+
     except FileNotFoundError:
         print("description.txt file not found")
         return False
     except Exception as e:
         print(f"Error sending message: {e}")
         return False
+
+
 
 def load_message_from_file():
     """Load and parse message content from description.txt file"""
