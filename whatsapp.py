@@ -121,6 +121,7 @@ def loop_through_chats_batched():
         total_processed = 0
         batch_count = 0
         max_batches = 20  # Prevent infinite loop
+        last_chat_name = None  # Track the last processed chat name
         
         while batch_count < max_batches:
             batch_count += 1
@@ -142,10 +143,51 @@ def loop_through_chats_batched():
             
             # Process current batch of chats
             processed_in_batch = 0
+            start_processing = (last_chat_name is None)  # Start processing if no last chat name yet
+            
             for i, chat in enumerate(chat_items):
                 try:
                     # Check pause/stop controls
                     check_script_control()
+                    
+                    # Get current chat name to check if we should start processing
+                    if not start_processing:
+                        try:
+                            # Get chat name using same logic as the last chat detection
+                            current_chat_name = None
+                            chat_name_selectors = [
+                                'span[title]',
+                                'div[title]',
+                                'span[dir="auto"]',
+                                '[data-testid="conversation-info-header-chat-title"]'
+                            ]
+                            
+                            for selector in chat_name_selectors:
+                                try:
+                                    name_element = chat.find_element(By.CSS_SELECTOR, selector)
+                                    potential_name = name_element.get_attribute("title") or name_element.text
+                                    if potential_name and len(potential_name) < 100:
+                                        current_chat_name = potential_name
+                                        break
+                                except:
+                                    continue
+                            
+                            if not current_chat_name:
+                                full_text = chat.text
+                                current_chat_name = full_text.split('\n')[0] if full_text else "Unknown"
+                            
+                            # Check if this is the last processed chat or after it
+                            if current_chat_name == last_chat_name:
+                                print(f"Found last processed chat: {current_chat_name} - Starting from here")
+                                start_processing = True
+                            else:
+                                print(f"Skipping already processed chat: {current_chat_name}")
+                                continue
+                                
+                        except:
+                            # If we can't get name, skip this chat
+                            print(f"Skipping chat {i+1} - couldn't get name")
+                            continue
                     
                     # Scroll into view just in case
                     driver.execute_script("arguments[0].scrollIntoView();", chat)
@@ -173,7 +215,37 @@ def loop_through_chats_batched():
                     if not group_unavailable and not is_last_chat:
                         test_send_message()
                     elif is_last_chat:
-                        print("Last Chat")
+                        # Get chat name dynamically - find the chat title/name element within the chat
+                        try:
+                            # Try different selectors to find just the chat name
+                            chat_name_selectors = [
+                                'span[title]',  # Chat name with title attribute
+                                'div[title]',   # Alternative title container
+                                'span[dir="auto"]',  # Chat name span
+                                '[data-testid="conversation-info-header-chat-title"]'  # Specific chat title
+                            ]
+                            
+                            chat_name = None
+                            for selector in chat_name_selectors:
+                                try:
+                                    name_element = chat.find_element(By.CSS_SELECTOR, selector)
+                                    potential_name = name_element.get_attribute("title") or name_element.text
+                                    # Only use if it's a reasonable length for a chat name (not a full message)
+                                    if potential_name and len(potential_name) < 100:
+                                        chat_name = potential_name
+                                        break
+                                except:
+                                    continue
+                            
+                            if not chat_name:
+                                # Fallback: try to extract first line of text content
+                                full_text = chat.text
+                                chat_name = full_text.split('\n')[0] if full_text else "Unknown"
+                                
+                            print(f"Last Chat: {chat_name}")
+                            last_chat_name = chat_name
+                        except:
+                            print("Last Chat: Unknown")
                         time.sleep(5)
                         # Continue to next batch - don't call test_send_message()
                         continue
