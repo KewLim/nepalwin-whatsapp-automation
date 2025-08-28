@@ -120,12 +120,12 @@ def loop_through_chats_batched():
         
         total_processed = 0
         batch_count = 0
-        max_batches = 20  # Prevent infinite loop
+        max_batches = 100  # Prevent infinite loop
         last_chat_name = None  # Track the last processed chat name
         
         while batch_count < max_batches:
             batch_count += 1
-            print(f"\n=== Processing Batch #{batch_count} ===")
+            print(f"\033[1;38;5;208m\n=== Processing Batch #{batch_count} ===\033[0m")
             
             # Find current visible chats (same fast method as before)
             chat_items = []
@@ -202,9 +202,9 @@ def loop_through_chats_batched():
                     is_last_chat = (i + 1) == len(chat_items)
                     
                     if is_last_chat:
-                        print(f"\033[1;33mProcessed chat #{total_processed} (Batch {batch_count}, Item {i+1}) - Last Chat\033[0m")
+                        print(f"\033[95mProcessed chat \033[92m#{total_processed}\033[95m (Batch \033[92m{batch_count}\033[95m, Item \033[92m{i+1}\033[95m) - Last Chat\033[0m")
                     else:
-                        print(f"\033[1;33mProcessed chat #{total_processed} (Batch {batch_count}, Item {i+1})\033[0m")
+                        print(f"\033[95mProcessed chat \033[92m#{total_processed}\033[95m (Batch \033[92m{batch_count}\033[95m, Item \033[92m{i+1}\033[95m)\033[0m")
                     
                     time.sleep(1.5)  # Give time for chat to load
                     
@@ -213,7 +213,8 @@ def loop_through_chats_batched():
                     
                     # Send message only if group is available and not last chat
                     if not group_unavailable and not is_last_chat:
-                        test_send_message()
+                        # test_send_message()
+                        send_message_from_file()
                     elif is_last_chat:
                         # Get chat name dynamically - find the chat title/name element within the chat
                         try:
@@ -326,8 +327,8 @@ def loop_through_chats():
                 
                 # Send message only if group is available
                 if not group_unavailable:
-                    # send_message_from_file()
-                    test_send_message()
+                    send_message_from_file()
+                    # test_send_message()
                 else:
                     print("Skipping message send - group is not available")
                 
@@ -469,8 +470,8 @@ def loop_through_all_chats_with_scroll():
                 
                 # Send message only if group is available
                 if not group_unavailable:
-                    # send_message_from_file()
-                    test_send_message()
+                    send_message_from_file()
+                    # test_send_message()
                 else:
                     print("Skipping message send - group is not available")
                     
@@ -518,7 +519,24 @@ def check_group_availability():
 
 def test_send_message():
     """Test function to verify messaging functionality"""
-    print("TEST HERE")
+    # --- Locate message input ---
+    selectors = [
+        (By.CSS_SELECTOR, 'div[contenteditable="true"][data-tab="10"]'),
+        (By.CSS_SELECTOR, 'div[contenteditable="true"]'),
+        (By.CSS_SELECTOR, 'p.selectable-text.copyable-text'),
+        (By.CSS_SELECTOR, '[data-testid="conversation-compose-box-input"]')
+    ]
+    message_input = WebDriverWait(driver, 10).until(
+        EC.any_of(*[EC.element_to_be_clickable(sel) for sel in selectors])
+    )
+    
+    # Click and clear the message input
+    message_input.click()
+    time.sleep(0.5)
+    # Select all text and delete
+    message_input.send_keys(Keys.COMMAND, 'a')  # Select all (macOS)
+    message_input.send_keys(Keys.DELETE)  # Clear selected text
+    print("Message input cleared")
     return True
 
 def send_message_from_file(message_index=0):
@@ -556,6 +574,15 @@ def send_message_from_file(message_index=0):
         message_input = WebDriverWait(driver, 10).until(
             EC.any_of(*[EC.element_to_be_clickable(sel) for sel in selectors])
         )
+
+        # Click and clear the message input
+        message_input.click()
+        time.sleep(0.5)
+        # Select all text and delete
+        message_input.send_keys(Keys.COMMAND, 'a')  # Select all (macOS)
+        message_input.send_keys(Keys.DELETE)  # Clear selected text
+        print("Message input cleared")
+        time.sleep(1)
 
         # --- Paste text into input ---
         pyperclip.copy(message_content)
@@ -604,7 +631,7 @@ def send_message_from_file(message_index=0):
 
                 send_button.click()
                 print("[INFO] Message + image sent successfully!")
-                time.sleep(1)
+                time.sleep(3)
                 
             except subprocess.CalledProcessError as e:
                 print(f"[ERROR] Failed to copy image to clipboard: {e}")
@@ -614,13 +641,17 @@ def send_message_from_file(message_index=0):
             print("[INFO] Text message sent successfully!")
 
         return True
-
+    
+    
     except FileNotFoundError:
         print("description.txt file not found")
         return False
     except Exception as e:
         print(f"Error sending message: {e}")
         return False
+    
+
+    time.sleep(2)  # Wait a bit before next action
 
 
 
