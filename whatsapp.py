@@ -195,8 +195,65 @@ def loop_through_chats_batched():
                     
                     # Click the chat
                     chat.click()
+                    get_current_scroll_position()
                     total_processed += 1
                     processed_in_batch += 1
+                    
+                    # Get chat name and print it
+                    try:
+                        current_chat_name = None
+                        chat_name_selectors = [
+                            'span[title]',
+                            'div[title]',
+                            'span[dir="auto"]',
+                            '[data-testid="conversation-info-header-chat-title"]'
+                        ]
+                        
+                        for selector in chat_name_selectors:
+                            try:
+                                name_element = chat.find_element(By.CSS_SELECTOR, selector)
+                                potential_name = name_element.get_attribute("title") or name_element.text
+                                if potential_name and len(potential_name) < 100:
+                                    current_chat_name = potential_name
+                                    break
+                            except:
+                                continue
+                        
+                        if not current_chat_name:
+                            full_text = chat.text
+                            current_chat_name = full_text.split('\n')[0] if full_text else "Unknown"
+                        
+                        print(f"Chat Title: {current_chat_name}")
+                        
+                        # Print next chat title if available
+                        try:
+                            if (i + 1) < len(chat_items):
+                                next_chat = chat_items[i + 1]
+                                next_chat_name = None
+                                
+                                for selector in chat_name_selectors:
+                                    try:
+                                        next_name_element = next_chat.find_element(By.CSS_SELECTOR, selector)
+                                        potential_next_name = next_name_element.get_attribute("title") or next_name_element.text
+                                        if potential_next_name and len(potential_next_name) < 100:
+                                            next_chat_name = potential_next_name
+                                            break
+                                    except:
+                                        continue
+                                
+                                if not next_chat_name:
+                                    next_full_text = next_chat.text
+                                    next_chat_name = next_full_text.split('\n')[0] if next_full_text else "Unknown"
+                                
+                                print(f"\033[1;33mNext Chat Title: {next_chat_name}\033[0m")
+                            else:
+                                print(f"\033[1;33mNext Chat Title: Last chat in batch\033[0m")
+                        except:
+                            print(f"\033[1;33mNext Chat Title: Unknown\033[0m")
+                            
+                    except:
+                        print("Chat Title: Unknown")
+                        print(f"\033[1;33mNext Chat Title: Unknown\033[0m")
                     
                     # Check if this is the last chat in current batch
                     is_last_chat = (i + 1) == len(chat_items)
@@ -213,8 +270,9 @@ def loop_through_chats_batched():
                     
                     # Send message only if group is available and not last chat
                     if not group_unavailable and not is_last_chat:
-                        # test_send_message()
-                        send_message_from_file()
+                        test_send_message()
+                        detect_chat_list_scrollbar()
+                        # send_message_from_file()
                     elif is_last_chat:
                         # Get chat name dynamically - find the chat title/name element within the chat
                         try:
@@ -273,217 +331,212 @@ def loop_through_chats_batched():
         print(f"Error in loop_through_chats_batched: {e}")
         return False
 
-def loop_through_chats():
-    """Loop through all chats in the chat list and click on each one"""
-    try:
-        # Wait for WhatsApp to load completely - using a more general selector
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div._ak72"))
-        )
-        
-        # Add some extra wait time for elements to fully load
-        time.sleep(3)
-        
-        # Try multiple selectors based on your actual WhatsApp structure
-        selectors = [
-            'div._ak72',  # Based on your HTML structure
-            'div[role="none"][tabindex="0"]',  # The outer container from your HTML
-            'div._ak72.false.false._ak73._asiw._ap1-._ap1_',  # Full class from your HTML
-            'div[role="gridcell"]',  # Another element from your structure
-            'div[tabindex="0"] div._ak72'  # Combination selector
-        ]
-        
-        chat_items = []
-        for selector in tqdm(selectors, desc="Trying selectors"):
-            chat_items = driver.find_elements(By.CSS_SELECTOR, selector)
-            tqdm.write(f"Selector '{selector}': Found {len(chat_items)} elements")
-            if len(chat_items) > 0:
-                break
-        
-        if len(chat_items) == 0:
-            print("No chat items found. Checking page source...")
-            # Debug: Check if we're on the right page
-            if "WhatsApp" in driver.title:
-                print("On WhatsApp page, but no chats found")
-            else:
-                print(f"Current page title: {driver.title}")
-            return False
-        
-        print(f"Found {len(chat_items)} chats")
-        
-        for i, chat in enumerate(chat_items):
-            try:
-                # Scroll into view just in case
-                driver.execute_script("arguments[0].scrollIntoView();", chat)
-                time.sleep(0.5)
-                
-                # Click the chat
-                chat.click()
-                print(f"\033[1;33mClicked chat #{i+1}\033[0m")
-                time.sleep(1.5)  # Give time for chat to load
-                
-                # check if chat group is no longer available
-                group_unavailable = check_group_availability()
-                
-                # Send message only if group is available
-                if not group_unavailable:
-                    send_message_from_file()
-                    # test_send_message()
-                else:
-                    print("Skipping message send - group is not available")
-                
-            except Exception as e:
-                print(f"Error on chat #{i+1}: {e}")
-                
-        print("Finished looping through all chats")
-        return True
-        
-    except Exception as e:
-        print(f"Error in loop_through_chats: {e}")
-        return False
 
-def loop_through_all_chats_with_scroll():
-    """Loop through ALL chats using scroll-and-collect approach to handle 100+ chats"""
+def detect_chat_list_scrollbar():
+    """Detect WhatsApp Web chat list scrollbar and test scroll control"""
     try:
-        # Wait for WhatsApp to load completely
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "div._ak72"))
-        )
-        
-        time.sleep(3)
-        
-        # Find the chat list container for scrolling
-        chat_list_container = None
-        container_selectors = [
+        # Try different selectors one by one to debug - including pane-side
+        selectors = [
+            '#pane-side',
             '[data-testid="chat-list"]',
-            'div[role="grid"]',
-            'div[tabindex="0"]',  # Main scrollable container
-            'div._ak72'  # Fallback to individual chat selector's parent
-        ]
-        
-        for selector in container_selectors:
-            try:
-                chat_list_container = driver.find_element(By.CSS_SELECTOR, selector)
-                print(f"Found chat list container using selector: {selector}")
-                break
-            except:
-                continue
-        
-        if not chat_list_container:
-            print("Could not find chat list container, falling back to page scroll")
-            chat_list_container = driver.find_element(By.TAG_NAME, "body")
-        
-        # Chat selectors (same as original function)
-        chat_selectors = [
+            'div[role="grid"]', 
+            'div[tabindex="0"]',
             'div._ak72',
-            'div[role="none"][tabindex="0"]',
-            'div._ak72.false.false._ak73._asiw._ap1-._ap1_',
-            'div[role="gridcell"]',
-            'div[tabindex="0"] div._ak72'
+            'div[aria-label*="Chat list"]'
         ]
         
-        processed_chats = set()  # Track processed chats by their text content
-        all_chats = []
-        last_chat_count = 0
-        scroll_attempts = 0
-        max_scroll_attempts = 50  # Prevent infinite scrolling
-        
-        print("Starting scroll-and-collect approach...")
-        
-        while scroll_attempts < max_scroll_attempts:
-            # Collect current visible chats
-            current_chats = []
-            for selector in chat_selectors:
-                try:
-                    elements = driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
-                        current_chats = elements
+        found_container = None
+        for selector in selectors:
+            try:
+                containers = driver.find_elements(By.CSS_SELECTOR, selector)
+                print(f"🔍 Selector '{selector}': Found {len(containers)} elements")
+                
+                for i, container in enumerate(containers):
+                    scroll_height = driver.execute_script("return arguments[0].scrollHeight;", container)
+                    client_height = driver.execute_script("return arguments[0].clientHeight;", container)
+                    print(f"   Container {i+1}: Height={client_height}px, ScrollHeight={scroll_height}px")
+                    
+                    if scroll_height > client_height:
+                        print(f"✅ Found scrollable container using '{selector}' (container {i+1})")
+                        found_container = container
                         break
-                except:
-                    continue
-            
-            # Process new chats (avoid duplicates)
-            new_chats_found = 0
-            for chat in current_chats:
-                try:
-                    # Use chat text or other identifier to avoid duplicates
-                    chat_identifier = chat.get_attribute('innerHTML')[:100]  # First 100 chars as ID
-                    if chat_identifier and chat_identifier not in processed_chats:
-                        processed_chats.add(chat_identifier)
-                        all_chats.append(chat)
-                        new_chats_found += 1
-                except:
-                    continue
-            
-            current_total = len(all_chats)
-            print(f"Scroll attempt {scroll_attempts + 1}: Found {new_chats_found} new chats, Total: {current_total}")
-            
-            # Check if we found new chats
-            if current_total == last_chat_count:
-                # No new chats found, try scrolling a bit more
-                if scroll_attempts < 3:  # Give it a few more tries
-                    scroll_attempts += 1
-                    time.sleep(1)
-                else:
-                    print("No new chats found after scrolling, assuming we've reached the end")
+                        
+                if found_container:
                     break
-            else:
-                last_chat_count = current_total
-                scroll_attempts = 0  # Reset scroll attempts when we find new chats
-            
-            # Scroll down to load more chats
-            try:
-                # Scroll the chat list container
-                driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", chat_list_container)
-                time.sleep(2)  # Wait for new chats to load
-                
-                # Alternative scroll method if the first doesn't work
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(1)
-                
-            except Exception as e:
-                print(f"Error during scrolling: {e}")
-                break
-            
-            scroll_attempts += 1
-        
-        print(f"Scroll collection complete! Found {len(all_chats)} total chats")
-        
-        if len(all_chats) == 0:
-            print("No chats found even after scrolling")
-            return False
-        
-        # Now process all collected chats
-        for i, chat in enumerate(tqdm(all_chats, desc="Processing chats")):
-            try:
-                # Scroll chat into view
-                driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", chat)
-                time.sleep(0.5)
-                
-                # Click the chat
-                chat.click()
-                print(f"\033[1;33mProcessing chat #{i+1}/{len(all_chats)}\033[0m")
-                time.sleep(1.5)
-                
-                # Check if chat group is available
-                group_unavailable = check_group_availability()
-                
-                # Send message only if group is available
-                if not group_unavailable:
-                    send_message_from_file()
-                    # test_send_message()
-                else:
-                    print("Skipping message send - group is not available")
                     
             except Exception as e:
-                print(f"Error processing chat #{i+1}: {e}")
+                print(f"❌ Error with selector '{selector}': {e}")
                 continue
         
-        print(f"Finished processing all {len(all_chats)} chats")
+        if not found_container:
+            print("❌ No scrollable chat list container found")
+            return False
+        
+        # Test scroll down
+        initial_position = driver.execute_script("return arguments[0].scrollTop;", found_container)
+        driver.execute_script("arguments[0].scrollTop += 200;", found_container)
+        time.sleep(1)
+        after_down = driver.execute_script("return arguments[0].scrollTop;", found_container)
+        print(f"⬇️ Scroll down test: {initial_position}px → {after_down}px")
+        
+        # Test scroll up
+        driver.execute_script("arguments[0].scrollTop -= 100;", found_container)
+        time.sleep(1)
+        after_up = driver.execute_script("return arguments[0].scrollTop;", found_container)
+        print(f"⬆️ Scroll up test: {after_down}px → {after_up}px")
+        
+        print("✅ Chat list scrollbar control working!")
         return True
         
     except Exception as e:
-        print(f"Error in loop_through_all_chats_with_scroll: {e}")
+        print(f"❌ Error detecting chat list scrollbar: {e}")
+        return False
+
+def get_current_scroll_position():
+    """Get current scrollbar position and return coordinates"""
+    try:
+        # Find the pane-side container
+        container = driver.find_element(By.CSS_SELECTOR, '#pane-side')
+        
+        # Get scroll information
+        scroll_top = driver.execute_script("return arguments[0].scrollTop;", container)
+        scroll_height = driver.execute_script("return arguments[0].scrollHeight;", container)
+        client_height = driver.execute_script("return arguments[0].clientHeight;", container)
+        
+        # Calculate scroll percentage
+        max_scroll = scroll_height - client_height
+        scroll_percentage = (scroll_top / max_scroll * 100) if max_scroll > 0 else 0
+        
+        position_info = {
+            'scroll_top': scroll_top,
+            'scroll_height': scroll_height,
+            'client_height': client_height,
+            'max_scroll': max_scroll,
+            'scroll_percentage': scroll_percentage
+        }
+        
+        print(f"📍 Current scroll position: {scroll_top}px ({scroll_percentage:.1f}%)")
+        return position_info
+        
+    except Exception as e:
+        print(f"❌ Error getting scroll position: {e}")
+        return None
+
+def detect_chat_list_scrollbar(target_position=None):
+    """Detect WhatsApp Web chat list scrollbar and move to target position"""
+    try:
+        # Try different selectors one by one to debug - including pane-side
+        selectors = [
+            '#pane-side',
+            '[data-testid="chat-list"]',
+            'div[role="grid"]', 
+            'div[tabindex="0"]',
+            'div._ak72',
+            'div[aria-label*="Chat list"]'
+        ]
+        
+        found_container = None
+        for selector in selectors:
+            try:
+                containers = driver.find_elements(By.CSS_SELECTOR, selector)
+                print(f"🔍 Selector '{selector}': Found {len(containers)} elements")
+                
+                for i, container in enumerate(containers):
+                    scroll_height = driver.execute_script("return arguments[0].scrollHeight;", container)
+                    client_height = driver.execute_script("return arguments[0].clientHeight;", container)
+                    print(f"   Container {i+1}: Height={client_height}px, ScrollHeight={scroll_height}px")
+                    
+                    if scroll_height > client_height:
+                        print(f"✅ Found scrollable container using '{selector}' (container {i+1})")
+                        found_container = container
+                        break
+                        
+                if found_container:
+                    break
+                    
+            except Exception as e:
+                print(f"❌ Error with selector '{selector}': {e}")
+                continue
+        
+        if not found_container:
+            print("❌ No scrollable chat list container found")
+            return False
+        
+        # If target_position is provided, move to that position
+        if target_position:
+            target_scroll = target_position.get('scroll_top', 0)
+            print(f"🎯 Moving to target position: {target_scroll}px")
+            driver.execute_script(f"arguments[0].scrollTop = {target_scroll};", found_container)
+            time.sleep(1)
+            new_position = driver.execute_script("return arguments[0].scrollTop;", found_container)
+            print(f"✅ Moved to position: {new_position}px")
+        else:
+            # Original test scroll behavior
+            initial_position = driver.execute_script("return arguments[0].scrollTop;", found_container)
+            driver.execute_script("arguments[0].scrollTop += 200;", found_container)
+            time.sleep(1)
+            after_down = driver.execute_script("return arguments[0].scrollTop;", found_container)
+            print(f"⬇️ Scroll down test: {initial_position}px → {after_down}px")
+            
+            driver.execute_script("arguments[0].scrollTop -= 100;", found_container)
+            time.sleep(1)
+            after_up = driver.execute_script("return arguments[0].scrollTop;", found_container)
+            print(f"⬆️ Scroll up test: {after_down}px → {after_up}px")
+        
+        print("✅ Chat list scrollbar control working!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error detecting chat list scrollbar: {e}")
+        return False
+
+def control_chat_list_scroll(action="down", amount=300):
+    """Control the WhatsApp Web chat list scrolling
+    
+    Args:
+        action (str): 'up', 'down', 'top', 'bottom', 'to_position'
+        amount (int): Pixels to scroll (for 'up'/'down') or position (for 'to_position')
+    """
+    try:
+        scrollbar_info = detect_chat_list_scrollbar()
+        if not scrollbar_info:
+            return False
+        
+        container = scrollbar_info['container']
+        
+        if action == "down":
+            driver.execute_script(f"arguments[0].scrollTop += {amount};", container)
+            print(f"⬇️ Scrolled down {amount}px")
+            
+        elif action == "up":
+            driver.execute_script(f"arguments[0].scrollTop -= {amount};", container)
+            print(f"⬆️ Scrolled up {amount}px")
+            
+        elif action == "top":
+            driver.execute_script("arguments[0].scrollTop = 0;", container)
+            print("🔝 Scrolled to top")
+            
+        elif action == "bottom":
+            driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", container)
+            print("🔻 Scrolled to bottom")
+            
+        elif action == "to_position":
+            driver.execute_script(f"arguments[0].scrollTop = {amount};", container)
+            print(f"📍 Scrolled to position {amount}px")
+            
+        else:
+            print(f"❌ Unknown scroll action: {action}")
+            return False
+        
+        # Wait a moment and get updated position
+        time.sleep(0.5)
+        new_scroll_top = driver.execute_script("return arguments[0].scrollTop;", container)
+        print(f"   New scroll position: {new_scroll_top}px")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error controlling chat list scroll: {e}")
         return False
 
 def check_group_availability():
