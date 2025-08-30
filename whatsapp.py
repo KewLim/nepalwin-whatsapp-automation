@@ -133,6 +133,25 @@ def loop_through_chats():
                 time.sleep(3)
                 continue
 
+            # Wait for chat list to fully load
+            print("⏳ Waiting for chat list to fully load...")
+            time.sleep(1)
+            
+            # Verify chats are loaded by checking if we can get names
+            loaded_chats = 0
+            for chat in chat_items[:5]:  # Check first 5 chats
+                try:
+                    test_name = get_chat_name(chat)
+                    if test_name and not test_name.startswith("Unknown"):
+                        loaded_chats += 1
+                except:
+                    continue
+            
+            if loaded_chats == 0:
+                print("⚠️ Chat elements not fully loaded, waiting...")
+                time.sleep(2)
+                continue
+
             # Iterate through chats
             found_next_chat = False
             for i, chat in enumerate(chat_items):
@@ -140,8 +159,15 @@ def loop_through_chats():
                     # Pause/stop controls
                     check_script_control()
 
-                    # Get chat name
+                    # Get chat name with stale element handling
                     current_chat_name = get_chat_name(chat)
+                    
+                    # Handle stale element - need to re-fetch chat list
+                    if current_chat_name and "StaleElement_RefetchNeeded" in current_chat_name:
+                        print("🔄 Stale element detected - breaking inner loop to re-fetch chat list")
+                        found_next_chat = False  # Force re-fetch
+                        break
+                    
                     if last_processed_chat_name and current_chat_name == last_processed_chat_name:
                         # Already processed last chat, skip
                         continue
@@ -158,7 +184,7 @@ def loop_through_chats():
                     found_next_chat = True
 
                     # Wait for chat to load
-                    time.sleep(1.5)
+                    time.sleep(5)
 
                     # Check if chat group is available
                     group_unavailable = check_group_availability()
@@ -180,6 +206,7 @@ def loop_through_chats():
                         scroll_to_top()
                         time.sleep(1)
                         detect_chat_list_scrollbar(saved_position, next_chat_name)
+                        time.sleep(3)
                     elif not next_chat_name:
                         print(f"Last Chat: {current_chat_name} - no message sent")
                     else:
@@ -371,7 +398,7 @@ def detect_chat_list_scrollbar(target_position=None, next_chat_to_click=None):
             time.sleep(1)
             new_position = driver.execute_script("return arguments[0].scrollTop;", found_container)
             print(f"[APPROVED] Moved to position: {new_position}px")
-            
+            time.sleep(3)
             # If next_chat_to_click is provided, find and click that chat
             if next_chat_to_click:
                 # print(f"🔍 Looking for chat: {next_chat_to_click}")
@@ -380,10 +407,7 @@ def detect_chat_list_scrollbar(target_position=None, next_chat_to_click=None):
                     print(f"\033[1;33m✅ Successfully clicked on chat: {next_chat_to_click}\033[0m")
                     test_send_message()
                     
-                    # Wait for WhatsApp to switch to the new chat and verify
                     time.sleep(2)
-                    actual_chat_name = get_current_chat_name()
-                    print(f"🔍 Verification - Current chat is now: {actual_chat_name}")
                     
                     # Don't send message here - let the main loop handle it
                 else:
@@ -399,30 +423,150 @@ def detect_chat_list_scrollbar(target_position=None, next_chat_to_click=None):
         return False
 
 def get_chat_name(chat_element):
-    """Extract chat name from a chat element"""
-    try:
-        # Try different selectors to get chat name
-        name_selectors = [
-            'span[title]',
-            'span._ak8o',
-            'span[dir="auto"]',
-            'div[title]'
-        ]
-        
-        for selector in name_selectors:
+    """Extract chat name from a chat element with retry logic"""
+    from selenium.common.exceptions import (
+        StaleElementReferenceException, 
+        NoSuchElementException, 
+        ElementNotInteractableException, 
+        WebDriverException
+    )
+    
+    max_retries = 3
+    retry_delay = 0.5
+    
+    for attempt in range(max_retries):
+        try:
+            # 1. Pre-check: Validate chat_element
+            if chat_element is None:
+                print(f"🔴 [Attempt {attempt + 1}] ERROR: chat_element is None")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return "Unknown_Error_NoneElement"
+            
+            print(f"🔍 [Attempt {attempt + 1}] Starting chat name extraction...")
+            
+            # 2. JavaScript execution error handling
             try:
-                name_element = chat_element.find_element(By.CSS_SELECTOR, selector)
-                name = name_element.get_attribute('title') or name_element.text.strip()
-                if name:
-                    return name
-            except:
+                print(f"📍 [Attempt {attempt + 1}] Scrolling element into view...")
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chat_element)
+                time.sleep(0.2)
+                print(f"✅ [Attempt {attempt + 1}] Element scrolled successfully")
+            except StaleElementReferenceException:
+                print(f"🔴 [Attempt {attempt + 1}] STALE ELEMENT: Chat element is no longer attached to DOM")
+                print(f"🔄 [Attempt {attempt + 1}] Need to re-fetch chat elements from main loop")
+                return "Unknown_Error_StaleElement_RefetchNeeded"
+            except WebDriverException as e:
+                print(f"🔴 [Attempt {attempt + 1}] WEBDRIVER ERROR during scroll: {str(e)[:100]}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return f"Unknown_Error_WebDriver_{str(e)[:10]}"
+            except Exception as e:
+                print(f"🔴 [Attempt {attempt + 1}] JS EXECUTION ERROR: {type(e).__name__}: {str(e)[:50]}")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                return f"Unknown_Error_JS_{str(e)[:10]}"
+            
+            # 3. DOM operation error handling
+            name_selectors = [
+                'span[title]',
+                'span._ak8o',
+                'span[dir="auto"]',
+                'div[title]'
+            ]
+            
+            print(f"🔍 [Attempt {attempt + 1}] Trying {len(name_selectors)} CSS selectors...")
+            selector_results = []
+            
+            for i, selector in enumerate(name_selectors):
+                try:
+                    print(f"🔍 [Attempt {attempt + 1}] Selector {i+1}/{len(name_selectors)}: {selector}")
+                    name_element = chat_element.find_element(By.CSS_SELECTOR, selector)
+                    print(f"✅ [Attempt {attempt + 1}] Found element with selector: {selector}")
+                    
+                    # 4. Attribute/text retrieval error handling
+                    try:
+                        name = name_element.get_attribute('title') or name_element.text.strip()
+                        print(f"📝 [Attempt {attempt + 1}] Retrieved text: '{name[:50]}...' (length: {len(name)})")
+                        
+                        if name and name != "":
+                            print(f"✅ [Attempt {attempt + 1}] SUCCESS: Chat name found via selector {i+1}: '{name}'")
+                            return name
+                        else:
+                            print(f"⚠️ [Attempt {attempt + 1}] Selector {i+1} returned empty text")
+                            
+                    except StaleElementReferenceException:
+                        print(f"🔴 [Attempt {attempt + 1}] STALE ELEMENT during text retrieval with selector {i+1}")
+                        selector_results.append(f"selector_{i+1}_stale")
+                        continue
+                    except Exception as e:
+                        print(f"🔴 [Attempt {attempt + 1}] ATTRIBUTE ERROR with selector {i+1}: {type(e).__name__}: {str(e)[:50]}")
+                        selector_results.append(f"selector_{i+1}_attr_error")
+                        continue
+                        
+                except NoSuchElementException:
+                    print(f"⚠️ [Attempt {attempt + 1}] NO ELEMENT found with selector {i+1}: {selector}")
+                    selector_results.append(f"selector_{i+1}_not_found")
+                    continue
+                except StaleElementReferenceException:
+                    print(f"🔴 [Attempt {attempt + 1}] STALE ELEMENT during find with selector {i+1}")
+                    selector_results.append(f"selector_{i+1}_stale")
+                    continue
+                except ElementNotInteractableException:
+                    print(f"🔴 [Attempt {attempt + 1}] ELEMENT NOT INTERACTABLE with selector {i+1}")
+                    selector_results.append(f"selector_{i+1}_not_interactable")
+                    continue
+                except Exception as e:
+                    print(f"🔴 [Attempt {attempt + 1}] DOM ERROR with selector {i+1}: {type(e).__name__}: {str(e)[:50]}")
+                    selector_results.append(f"selector_{i+1}_dom_error")
+                    continue
+            
+            print(f"⚠️ [Attempt {attempt + 1}] All selectors failed. Results: {selector_results}")
+            
+            # 5. Fallback: get text content with error handling
+            try:
+                print(f"🔄 [Attempt {attempt + 1}] Trying fallback: direct text extraction...")
+                text_content = chat_element.text.strip()
+                print(f"📝 [Attempt {attempt + 1}] Raw text content: '{text_content[:100]}...' (length: {len(text_content)})")
+                
+                if text_content and len(text_content) > 0:
+                    first_line = text_content.split('\n')[0].strip()
+                    print(f"📝 [Attempt {attempt + 1}] First line: '{first_line}'")
+                    
+                    if first_line and first_line != "":
+                        print(f"✅ [Attempt {attempt + 1}] SUCCESS: Chat name found via fallback: '{first_line}'")
+                        return first_line
+                    else:
+                        print(f"⚠️ [Attempt {attempt + 1}] Fallback returned empty first line")
+                else:
+                    print(f"⚠️ [Attempt {attempt + 1}] Fallback returned empty text content")
+                    
+            except StaleElementReferenceException:
+                print(f"🔴 [Attempt {attempt + 1}] STALE ELEMENT during fallback text extraction")
+            except Exception as e:
+                print(f"🔴 [Attempt {attempt + 1}] FALLBACK ERROR: {type(e).__name__}: {str(e)[:50]}")
+            
+            # If we get here, element might not be loaded yet
+            if attempt < max_retries - 1:
+                print(f"⚠️ [Attempt {attempt + 1}] Chat name not found, retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
                 continue
-        
-        # Fallback: get text content
-        return chat_element.text.strip().split('\n')[0]
-        
-    except Exception as e:
-        return f"Unknown_{str(e)[:10]}"
+                
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+            print(f"🔴 [Attempt {attempt + 1}] UNEXPECTED ERROR: {error_type}: {error_msg[:100]}")
+            
+            if attempt < max_retries - 1:
+                print(f"🔄 [Attempt {attempt + 1}] Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                continue
+            return f"Unknown_Error_{error_type}_{error_msg[:10]}"
+    
+    print(f"❌ All {max_retries} attempts failed - returning Unknown_NotLoaded")
+    return "Unknown_NotLoaded"
 
 def click_chat_by_name(chat_name):
     """Find and click a chat by its name"""
