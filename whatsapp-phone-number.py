@@ -230,8 +230,8 @@ def loop_through_numbers():
                     
                     # Send message from file
                     print(f"[INFO] Sending message to chat for number {number}")
-                    test_send_message()
-                    # send_message_from_file()
+                    # test_send_message()
+                    send_message_from_file()
                     time.sleep(2)
 
                 except Exception:
