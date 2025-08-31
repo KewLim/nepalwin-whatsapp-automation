@@ -79,6 +79,35 @@ def click_group_filter():
         print(f"Failed to click Groups filter button: {e}")
         return False
 
+def click_non_excluded_names(driver, exclude_word="luckytaj"):
+    try:
+        # Wait for the tag suggestion container
+        container = WebDriverWait(driver, 5).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.xc9l9hb.x10l6tqk.x1lliihq"))
+        )
+
+        # Now only look for names inside this container
+        name_elements = container.find_elements(By.CSS_SELECTOR, "span._ao3e")
+
+        for elem in name_elements:
+            name_text = elem.text.strip()
+            print(f"\033[94m[DEBUG]\033[0m Found name element text: '{name_text}'")
+            if name_text and exclude_word.lower() not in name_text.lower():
+                try:
+                    driver.execute_script("arguments[0].scrollIntoView(true);", elem)
+                    elem.click()
+                    print(f"\033[92m[APPROVED]\033[0m Clicked on: {name_text}")
+                    return True
+                except Exception as e:
+                    print(f"\033[91m[WARN]\033[0m Could not click {name_text}: {repr(e)}")
+                    continue
+
+        print(f"\033[93m[INFO]\033[0m No names found without '{exclude_word}' inside container")
+        return False
+
+    except Exception as e:
+        print(f"\033[91m[ERROR]\033[0m Could not retrieve names: {repr(e)}")
+        return False
 
 
 
@@ -201,7 +230,8 @@ def loop_through_numbers():
                     
                     # Send message from file
                     print(f"[INFO] Sending message to chat for number {number}")
-                    send_message_from_file()
+                    test_send_message()
+                    # send_message_from_file()
                     time.sleep(2)
 
                 except Exception:
@@ -346,6 +376,18 @@ def test_send_message():
     message_input.send_keys(Keys.COMMAND, 'a')  # Select all (macOS)
     message_input.send_keys(Keys.DELETE)  # Clear selected text
     print("Message input cleared")
+
+    time.sleep(1)
+    message_input.send_keys("@")
+    time.sleep(0.5)
+    click_non_excluded_names(driver)
+
+    time.sleep(2)
+    message_input.send_keys(Keys.COMMAND, 'a')  # Select all (macOS)
+    message_input.send_keys(Keys.DELETE)  # Clear selected text
+    print("Message input cleared")
+
+
     return True
 
 def send_message_from_file(message_index=0):
@@ -392,6 +434,12 @@ def send_message_from_file(message_index=0):
         message_input.send_keys(Keys.DELETE)  # Clear selected text
         print("Message input cleared")
         time.sleep(1)
+
+        # --- Click to open tag suggestions and select non-excluded name ---
+        message_input.send_keys("@")
+        time.sleep(0.5)
+        click_non_excluded_names(driver)
+        time.sleep(0.5)
 
         # --- Paste text into input ---
         pyperclip.copy(message_content)
