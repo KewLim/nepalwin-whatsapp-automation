@@ -21,6 +21,15 @@ import signal
 import sys
 import threading
 
+# Try to import keyboard, make it optional
+try:
+    import keyboard
+    KEYBOARD_AVAILABLE = True
+except ImportError:
+    KEYBOARD_AVAILABLE = False
+    print("⚠️  Warning: 'keyboard' library not installed. Ctrl+P pause functionality will not work.")
+    print("   Install with: pip install keyboard")
+
 # Global control variables
 script_paused = False
 script_stopped = False
@@ -37,6 +46,29 @@ def signal_handler(signum, frame):
         pass
     sys.exit(0)
 
+def toggle_pause():
+    """Toggle pause state when Ctrl+P is pressed"""
+    global script_paused
+    with pause_lock:
+        script_paused = not script_paused
+        if script_paused:
+            print("\n⏸️  Script PAUSED - Press Ctrl+P again to continue...")
+        else:
+            print("\n▶️  Script RESUMED - Continuing execution...")
+
+def setup_keyboard_listener():
+    """Setup keyboard listener for pause/continue functionality"""
+    if not KEYBOARD_AVAILABLE:
+        print("🎮 Keyboard listener not available - install 'keyboard' library for Ctrl+P functionality")
+        return
+        
+    try:
+        keyboard.add_hotkey('ctrl+p', toggle_pause)
+        print("🎮 Keyboard listener setup complete")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not setup keyboard listener: {e}")
+        print("🎮 Pause functionality may not work properly")
+
 
 
 def check_script_control():
@@ -50,11 +82,27 @@ def check_script_control():
         except:
             pass
         sys.exit(0)
+    
+    # Handle pause state
+    while script_paused:
+        time.sleep(0.1)  # Small delay to prevent CPU spinning
+        if script_stopped:  # Check if stop was requested during pause
+            print("Script stopped by user")
+            try:
+                driver.quit()
+            except:
+                pass
+            sys.exit(0)
 
 def setup_signal_handlers():
     """Setup signal handlers for graceful shutdown"""
     signal.signal(signal.SIGINT, signal_handler)
-    print("🎮 Controls: Ctrl+C = Stop | Type 'PAUSE' in terminal during execution to pause")
+    setup_keyboard_listener()
+    
+    if KEYBOARD_AVAILABLE:
+        print("🎮 Controls: Ctrl+C = Stop | Ctrl+P = Pause/Continue")
+    else:
+        print("🎮 Controls: Ctrl+C = Stop")
 
 def wait_for_user_input(message="Press ENTER to continue..."):
     """Pause execution until user presses ENTER in terminal"""
@@ -65,6 +113,73 @@ def wait_for_user_input(message="Press ENTER to continue..."):
         print("\nOperation cancelled by user")
         return False
     return True
+
+def get_row_selection():
+    """Get user input for row selection from phone_number.txt"""
+    try:
+        # First, show how many numbers are available
+        try:
+            with open("phone_number.txt", "r") as f:
+                total_numbers = sum(1 for line in f if line.strip() and re.match(r'^\+?\d{10,15}$', line.strip().replace(" ", "").replace("-", "")))
+        except FileNotFoundError:
+            print("❌ phone_number.txt not found")
+            return None, None
+        
+        print(f"\n📊 Total valid phone numbers in file: {total_numbers}")
+        print("\n🎯 Row Selection Options:")
+        print("1. Process all numbers (default)")
+        print("2. Start from specific row")
+        print("3. Process specific range")
+        
+        try:
+            choice = input("\nEnter your choice (1-3) or press ENTER for default: ").strip()
+            
+            if not choice or choice == "1":
+                return None, None
+            
+            elif choice == "2":
+                start_row = input(f"Enter starting row (1-{total_numbers}): ").strip()
+                if not start_row.isdigit():
+                    print("Invalid input, using default (all numbers)")
+                    return None, None
+                start_row = int(start_row)
+                if start_row < 1 or start_row > total_numbers:
+                    print(f"Row must be between 1 and {total_numbers}, using default")
+                    return None, None
+                return start_row, None
+            
+            elif choice == "3":
+                start_row = input(f"Enter starting row (1-{total_numbers}): ").strip()
+                max_rows = input("Enter number of rows to process: ").strip()
+                
+                if not start_row.isdigit() or not max_rows.isdigit():
+                    print("Invalid input, using default (all numbers)")
+                    return None, None
+                    
+                start_row = int(start_row)
+                max_rows = int(max_rows)
+                
+                if start_row < 1 or start_row > total_numbers:
+                    print(f"Starting row must be between 1 and {total_numbers}, using default")
+                    return None, None
+                    
+                if max_rows < 1:
+                    print("Number of rows must be positive, using default")
+                    return None, None
+                    
+                return start_row, max_rows
+            
+            else:
+                print("Invalid choice, using default (all numbers)")
+                return None, None
+                
+        except KeyboardInterrupt:
+            print("\nOperation cancelled by user")
+            return None, None
+            
+    except Exception as e:
+        print(f"Error in row selection: {e}")
+        return None, None
 
 def click_group_filter():
     """Click on the Groups filter button"""
@@ -79,7 +194,7 @@ def click_group_filter():
         print(f"Failed to click Groups filter button: {e}")
         return False
 
-def click_non_excluded_names(driver, exclude_word="luckytaj"):
+def click_non_excluded_names(driver, exclude_words=["NepalWin", "NPW", "Blocked"]):
     try:
         # Wait for the tag suggestion container
         container = WebDriverWait(driver, 5).until(
@@ -90,19 +205,26 @@ def click_non_excluded_names(driver, exclude_word="luckytaj"):
         name_elements = container.find_elements(By.CSS_SELECTOR, "span._ao3e")
 
         for elem in name_elements:
+            # Check for pause/stop before processing each name
+            check_script_control()
+            
             name_text = elem.text.strip()
             print(f"\033[94m[DEBUG]\033[0m Found name element text: '{name_text}'")
-            if name_text and exclude_word.lower() not in name_text.lower():
+            
+            # Check if any exclude word is in the name (case insensitive)
+            should_exclude = any(exclude_word.lower() in name_text.lower() for exclude_word in exclude_words)
+            
+            if name_text and not should_exclude:
                 try:
                     driver.execute_script("arguments[0].scrollIntoView(true);", elem)
                     elem.click()
-                    print(f"\033[92m[APPROVED]\033[0m Clicked on: {name_text}")
+                    print(f"\033[92m[APPROVED]\033[0m Clicked on: \033[92m{name_text}\033[0m")
                     return True
                 except Exception as e:
                     print(f"\033[91m[WARN]\033[0m Could not click {name_text}: {repr(e)}")
                     continue
 
-        print(f"\033[93m[INFO]\033[0m No names found without '{exclude_word}' inside container")
+        print(f"\033[93m[INFO]\033[0m No names found without {exclude_words} inside container")
         return False
 
     except Exception as e:
@@ -111,24 +233,52 @@ def click_non_excluded_names(driver, exclude_word="luckytaj"):
 
 
 
-def loop_through_numbers():
-    """Loop through phone numbers from phone_number.txt and paste into search box"""
+def loop_through_numbers(start_row=None, max_rows=None):
+    """Loop through phone numbers from phone_number.txt and paste into search box
+    
+    Args:
+        start_row (int): Starting row number (1-based index, None = start from beginning)
+        max_rows (int): Maximum number of rows to process (None = process all)
+    """
     try:
         # Load phone numbers from file
-        phone_numbers = []
+        all_phone_numbers = []
         with open("phone_number.txt", "r") as f:
             for line in f:
                 number = line.strip()
                 if number and re.match(r'^\+?\d{10,15}$', number.replace(" ", "").replace("-", "")):
-                    phone_numbers.append(number.replace(" ", "").replace("-", ""))
+                    all_phone_numbers.append(number.replace(" ", "").replace("-", ""))
         
-        if not phone_numbers:
+        if not all_phone_numbers:
             print("❌ No valid phone numbers found in phone_number.txt")
             return False
         
-        print(f"📞 Loaded {len(phone_numbers)} phone numbers from file")
+        # Apply row filtering
+        if start_row is not None:
+            start_index = max(0, start_row - 1)  # Convert to 0-based index
+            all_phone_numbers = all_phone_numbers[start_index:]
+            
+        if max_rows is not None:
+            all_phone_numbers = all_phone_numbers[:max_rows]
+            
+        phone_numbers = all_phone_numbers
+        
+        if not phone_numbers:
+            print("❌ No phone numbers found in specified range")
+            return False
+        
+        range_info = ""
+        if start_row or max_rows:
+            start_display = start_row if start_row else 1
+            end_display = (start_display + len(phone_numbers) - 1) if phone_numbers else start_display
+            range_info = f" (rows {start_display}-{end_display})"
+            
+        print(f"📞 Loaded {len(phone_numbers)} phone numbers from file{range_info}")
         
         for number in phone_numbers:
+            # Check for pause/stop before processing each number
+            check_script_control()
+            
             print(f"🔍 Processing number: {number}")
             
             try:
@@ -230,8 +380,9 @@ def loop_through_numbers():
                     
                     # Send message from file
                     print(f"[INFO] Sending message to chat for number {number}")
-                    # test_send_message()
-                    send_message_from_file()
+                    test_send_message()
+                    # send_message_from_file()
+                    
                     time.sleep(2)
 
                 except Exception:
@@ -476,7 +627,7 @@ def send_message_from_file(message_index=0):
                 
                 # Paste the image
                 message_input.send_keys(Keys.COMMAND, 'v')
-                time.sleep(2)
+                time.sleep(1)
                 
                 print(f"[INFO] Image pasted from clipboard: {os.path.basename(image_path)}")
                 time.sleep(1)
@@ -580,7 +731,7 @@ def load_message_from_file():
 # ============= Main Script =============
 
 
-profile_path = "/Users/admin/Library/Application Support/Firefox/Profiles/7oz304au.default-release"
+profile_path = "/Users/admin/Library/Application Support/Firefox/Profiles/focg601r.NepalWin"
 
 options = Options()
 options.profile = webdriver.FirefoxProfile(profile_path)
@@ -610,16 +761,23 @@ try:
         EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'x3nfvp2')]//h1[text()='WhatsApp Web']"))
     )
 
+    # Get user input for row selection
+    start_row, max_rows = get_row_selection()
+    
     # Pause here to allow user adjust position
     time.sleep(2)
-    loop_through_numbers()    
+    loop_through_numbers(start_row, max_rows)    
     # loop_through_all_chats_with_scroll()
 
 except:
     print("WhatsApp Web header not found - already logged in")
+    
+    # Get user input for row selection
+    start_row, max_rows = get_row_selection()
+    
     # Click the Groups filter button
     time.sleep(2)
-    loop_through_numbers()
+    loop_through_numbers(start_row, max_rows)
     # loop_through_all_chats_with_scroll()
 
 # Wait for WhatsApp to load completely
