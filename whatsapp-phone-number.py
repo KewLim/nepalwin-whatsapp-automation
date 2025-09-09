@@ -12,7 +12,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 import os
 import glob
 from selenium.webdriver.support.ui import Select
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 from tqdm import tqdm
 import pyperclip
@@ -253,6 +253,21 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
         start_row (int): Starting row number (1-based index, None = start from beginning)
         max_rows (int): Maximum number of rows to process (None = process all)
     """
+    # Initialize statistics
+    successful_numbers = 0
+    failed_numbers = 0
+    
+    # Add timestamp to not_in_group.txt at start of processing
+    try:
+        with open("not_in_group.txt", "a", encoding="utf-8") as f:
+            # GMT+7 timezone (7 hours ahead of UTC)
+            gmt_plus_7 = datetime.utcnow() + timedelta(hours=7)
+            timestamp = gmt_plus_7.strftime("%Y-%m-%d %H:%M:%S GMT+7")
+            f.write(f"\n=== Processing started: {timestamp} ===\n")
+        print(f"📅 GMT+7 Timestamp recorded in not_in_group.txt")
+    except Exception as e:
+        print(f"⚠️ Could not write timestamp: {e}")
+    
     try:
         # Load phone numbers from file
         all_phone_numbers = []
@@ -365,6 +380,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                         with open("not_in_group.txt", "a", encoding="utf-8") as f:
                             f.write(f"{number}\n")
                         print(f"\033[93m[RECORDED]\033[0m Number \033[93m{number}\033[0m saved to not_in_group.txt")
+                        failed_numbers += 1
                         continue  # jump to next number in your loop
 
                 except TimeoutException:
@@ -409,6 +425,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     print(f"\033[1;32m[{actual_row}/{total_numbers}]\033[0m [INFO] Sending message to chat for number {number}")
                     # test_send_message()
                     send_message_from_file()
+                    successful_numbers += 1
                     
                     time.sleep(1)
 
@@ -418,6 +435,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     with open("not_in_group.txt", "a", encoding="utf-8") as f:
                         f.write(f"{number}\n")
                     print(f"\033[93m[RECORDED]\033[0m Number {number} saved to not_in_group.txt")
+                    failed_numbers += 1
                     continue
 
                 
@@ -427,7 +445,43 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
 
             except Exception as e:
                 print(f"⚠️ Could not process number {number}: {repr(e)}")
+                failed_numbers += 1
                 continue
+
+        # Print completion statistics
+        print("\n" + "="*60)
+        print("📊 PROCESSING COMPLETED!")
+        print("="*60)
+        print(f"✅ Successful messages sent: {successful_numbers}")
+        print(f"❌ Numbers not found/failed: {failed_numbers}")
+        print(f"📞 Total numbers processed: {successful_numbers + failed_numbers}")
+        
+        # Count numbers in not_in_group.txt file
+        try:
+            with open("not_in_group.txt", "r", encoding="utf-8") as f:
+                not_found_count = len([line for line in f if line.strip()])
+            print(f"📝 Numbers recorded in not_in_group.txt: {not_found_count}")
+        except FileNotFoundError:
+            print(f"📝 Numbers recorded in not_in_group.txt: 0")
+        
+        print("="*60)
+        print("🎉 All numbers processed successfully!")
+        
+        # Add completion timestamp to not_in_group.txt
+        try:
+            with open("not_in_group.txt", "a", encoding="utf-8") as f:
+                # GMT+7 timezone (7 hours ahead of UTC)
+                gmt_plus_7 = datetime.utcnow() + timedelta(hours=7)
+                timestamp = gmt_plus_7.strftime("%Y-%m-%d %H:%M:%S GMT+7")
+                f.write(f"=== Processing completed: {timestamp} ===\n\n")
+            print(f"📅 GMT+7 Completion timestamp recorded in not_in_group.txt")
+        except Exception as e:
+            print(f"⚠️ Could not write completion timestamp: {e}")
+        
+        print("Closing browser in 5 seconds...")
+        time.sleep(5)
+        
+        return True
 
     except Exception as e:
         print(f"❌ Error in loop_through_numbers: {repr(e)}")
@@ -818,7 +872,7 @@ try:
     
     # Pause here to allow user adjust position
     time.sleep(1)
-    loop_through_numbers(start_row, max_rows, total_numbers)    
+    processing_result = loop_through_numbers(start_row, max_rows, total_numbers)    
     # loop_through_all_chats_with_scroll()
 
 except:
@@ -829,13 +883,19 @@ except:
     
     # Click the Groups filter button
     time.sleep(2)
-    loop_through_numbers(start_row, max_rows, total_numbers)
+    processing_result = loop_through_numbers(start_row, max_rows, total_numbers)
     # loop_through_all_chats_with_scroll()
 
-# Wait for WhatsApp to load completely
-WebDriverWait(driver, 30).until(
-    EC.presence_of_element_located((By.CSS_SELECTOR, "div._ak72"))
-)
+# Process complete - close browser
+try:
+    print("\n🔄 Shutting down browser...")
+    driver.quit()
+    print("✅ Browser closed successfully!")
+except Exception as e:
+    print(f"⚠️ Error closing browser: {e}")
+
+print("\n👋 Script execution completed!")
+sys.exit(0)
 
 
 
