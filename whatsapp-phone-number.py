@@ -123,7 +123,7 @@ def get_row_selection():
                 total_numbers = sum(1 for line in f if line.strip() and re.match(r'^\+?\d{10,15}$', line.strip().replace(" ", "").replace("-", "")))
         except FileNotFoundError:
             print("❌ phone_number.txt not found")
-            return None, None
+            return None, None, 0
         
         print(f"\n📊 Total valid phone numbers in file: {total_numbers}")
         print("\n🎯 Row Selection Options:")
@@ -135,18 +135,18 @@ def get_row_selection():
             choice = input("\nEnter your choice (1-3) or press ENTER for default: ").strip()
             
             if not choice or choice == "1":
-                return None, None
+                return None, None, total_numbers
             
             elif choice == "2":
                 start_row = input(f"Enter starting row (1-{total_numbers}): ").strip()
                 if not start_row.isdigit():
                     print("Invalid input, using default (all numbers)")
-                    return None, None
+                    return None, None, total_numbers
                 start_row = int(start_row)
                 if start_row < 1 or start_row > total_numbers:
                     print(f"Row must be between 1 and {total_numbers}, using default")
-                    return None, None
-                return start_row, None
+                    return None, None, total_numbers
+                return start_row, None, total_numbers
             
             elif choice == "3":
                 start_row = input(f"Enter starting row (1-{total_numbers}): ").strip()
@@ -154,32 +154,32 @@ def get_row_selection():
                 
                 if not start_row.isdigit() or not max_rows.isdigit():
                     print("Invalid input, using default (all numbers)")
-                    return None, None
+                    return None, None, total_numbers
                     
                 start_row = int(start_row)
                 max_rows = int(max_rows)
                 
                 if start_row < 1 or start_row > total_numbers:
                     print(f"Starting row must be between 1 and {total_numbers}, using default")
-                    return None, None
+                    return None, None, total_numbers
                     
                 if max_rows < 1:
                     print("Number of rows must be positive, using default")
-                    return None, None
+                    return None, None, total_numbers
                     
-                return start_row, max_rows
+                return start_row, max_rows, total_numbers
             
             else:
                 print("Invalid choice, using default (all numbers)")
-                return None, None
+                return None, None, total_numbers
                 
         except KeyboardInterrupt:
             print("\nOperation cancelled by user")
-            return None, None
+            return None, None, total_numbers
             
     except Exception as e:
         print(f"Error in row selection: {e}")
-        return None, None
+        return None, None, 0
 
 def click_group_filter():
     """Click on the Groups filter button"""
@@ -194,7 +194,20 @@ def click_group_filter():
         print(f"Failed to click Groups filter button: {e}")
         return False
 
-def click_non_excluded_names(driver, exclude_words=["NepalWin", "NPW", "Blocked"]):
+def load_exclude_words():
+    """Load exclude words from exclude_words.txt file"""
+    try:
+        with open('exclude_words.txt', 'r', encoding='utf-8') as f:
+            words = [line.strip() for line in f.readlines() if line.strip()]
+            return words if words else ["NepalWin", "NPW", "Blocked"]
+    except FileNotFoundError:
+        print("⚠️ exclude_words.txt not found, using default exclude words")
+        return ["NepalWin", "NPW", "Blocked"]
+
+def click_non_excluded_names(driver, exclude_words=None):
+    if exclude_words is None:
+        exclude_words = load_exclude_words()
+    
     try:
         # Wait for the tag suggestion container
         container = WebDriverWait(driver, 5).until(
@@ -233,7 +246,7 @@ def click_non_excluded_names(driver, exclude_words=["NepalWin", "NPW", "Blocked"
 
 
 
-def loop_through_numbers(start_row=None, max_rows=None):
+def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
     """Loop through phone numbers from phone_number.txt and paste into search box
     
     Args:
@@ -275,9 +288,12 @@ def loop_through_numbers(start_row=None, max_rows=None):
             
         print(f"📞 Loaded {len(phone_numbers)} phone numbers from file{range_info}")
         
-        for number in phone_numbers:
+        for row_index, number in enumerate(phone_numbers, start=1):
             # Check for pause/stop before processing each number
             check_script_control()
+            
+            # Calculate actual row number considering start_row offset
+            actual_row = (start_row if start_row else 1) + row_index - 1
             
             print(f"🔍 Processing number: {number}")
             
@@ -338,16 +354,19 @@ def loop_through_numbers(start_row=None, max_rows=None):
 
                 # --- Check for "No chats, contacts or messages found" ---
                 try:
-                    no_result = WebDriverWait(driver, 2).until(
-                        EC.presence_of_element_located((By.XPATH, "//span[contains(text(), 'No chats, contacts or messages found')]"))
+                    no_result = WebDriverWait(driver, 2, poll_frequency=0.2).until(
+                        EC.presence_of_element_located((
+                            By.XPATH,
+                            "//span[contains(text(), 'No chats, contacts or messages found')]"
+                        ))
                     )
                     if no_result.is_displayed():
                         print(f"\033[91m[WARN]\033[0m No chat found for {number}")
-                        # Record the number in not_in_group.txt
                         with open("not_in_group.txt", "a", encoding="utf-8") as f:
                             f.write(f"{number}\n")
-                        print(f"\033[93m[RECORDED]\033[0m Number {number} saved to not_in_group.txt")
+                        print(f"\033[93m[RECORDED]\033[0m Number \033[93m{number}\033[0m saved to not_in_group.txt")
                         continue  # jump to next number in your loop
+
                 except TimeoutException:
                     # No such span -> safe to continue normal flow
                     pass
@@ -364,26 +383,34 @@ def loop_through_numbers(start_row=None, max_rows=None):
                         time.sleep(0.05)
                 
                 try:
-                    # Locate the "Groups in common" div
-                    groups_in_common = driver.find_element(
-                        By.XPATH, "//div[@role='listitem' and contains(., 'Groups in common')]"
+                    # Wait for the "Groups in common" div to appear
+                    groups_in_common = WebDriverWait(driver, 20, poll_frequency=0.2).until(
+                        EC.presence_of_element_located((
+                            By.XPATH,
+                            "//div[@role='listitem' and contains(., 'Groups in common')]"
+                        ))
                     )
 
-                    # Get the next sibling div (the chat after it)
-                    next_chat = groups_in_common.find_element(By.XPATH, "following-sibling::div[1]")
+                    # Wait for the next sibling div (the chat after 'Groups in common')
+                    next_chat = WebDriverWait(driver, 20, poll_frequency=0.2).until(
+                        EC.element_to_be_clickable((
+                            By.XPATH,
+                            "//div[@role='listitem' and contains(., 'Groups in common')]/following-sibling::div[1]"
+                        ))
+                    )
 
-                    # Click the chat
+                    # Scroll into view and click
                     driver.execute_script("arguments[0].scrollIntoView();", next_chat)
                     next_chat.click()
                     print("[INFO] Clicked chat after 'Groups in common'")
-                    time.sleep(2)
+                    #time.sleep(2)
                     
                     # Send message from file
-                    print(f"[INFO] Sending message to chat for number {number}")
-                    test_send_message()
-                    # send_message_from_file()
+                    print(f"\033[1;32m[{actual_row}/{total_numbers}]\033[0m [INFO] Sending message to chat for number {number}")
+                    # test_send_message()
+                    send_message_from_file()
                     
-                    time.sleep(2)
+                    time.sleep(1)
 
                 except Exception:
                     print(f"\033[91m[WARN]\033[0m 'Groups in common' not found for {number}")
@@ -396,7 +423,7 @@ def loop_through_numbers(start_row=None, max_rows=None):
                 
 
                 # Wait a bit before next number
-                time.sleep(3)
+                time.sleep(1.5)
 
             except Exception as e:
                 print(f"⚠️ Could not process number {number}: {repr(e)}")
@@ -533,7 +560,7 @@ def test_send_message():
     time.sleep(0.5)
     click_non_excluded_names(driver)
 
-    time.sleep(2)
+    time.sleep(.5)
     message_input.send_keys(Keys.COMMAND, 'a')  # Select all (macOS)
     message_input.send_keys(Keys.DELETE)  # Clear selected text
     print("Message input cleared")
@@ -597,7 +624,7 @@ def send_message_from_file(message_index=0):
         message_input.click()
         message_input.send_keys(Keys.COMMAND, 'v')  # macOS paste
         print(f"[INFO] Text pasted: {message_content[:50]}...")
-        time.sleep(1)
+        time.sleep(.5)
 
         # --- Check for image in IMAGE-TO-SEND folder ---
         image_folder = "IMAGE-TO-SEND"
@@ -639,7 +666,7 @@ def send_message_from_file(message_index=0):
 
                 send_button.click()
                 print("[INFO] Message + image sent successfully!")
-                time.sleep(3)
+                time.sleep(1.5)
                 
             except subprocess.CalledProcessError as e:
                 print(f"[ERROR] Failed to copy image to clipboard: {e}")
@@ -734,7 +761,16 @@ def load_message_from_file():
 profile_path = "/Users/admin/Library/Application Support/Firefox/Profiles/focg601r.NepalWin"
 
 options = Options()
-options.profile = webdriver.FirefoxProfile(profile_path)
+try:
+    if os.path.exists(profile_path):
+        options.profile = webdriver.FirefoxProfile(profile_path)
+        print(f"✅ Using Firefox profile: {profile_path}")
+    else:
+        print(f"⚠️ Profile not found: {profile_path}")
+        print("Using default Firefox profile...")
+except Exception as e:
+    print(f"⚠️ Error loading profile: {e}")
+    print("Using default Firefox profile...")
 
 # Anti-detection measures
 options.set_preference("dom.webdriver.enabled", False)
@@ -745,9 +781,25 @@ options.set_preference("general.useragent.override", "Mozilla/5.0 (Macintosh; In
 # options.add_argument('--headless')
 
 # Setup the driver
-service = Service(GeckoDriverManager().install())
-driver = webdriver.Firefox(service=service, options=options)
-driver.maximize_window()
+try:
+    service = Service(GeckoDriverManager().install())
+    print("✅ GeckoDriver service created")
+    
+    print("🔄 Starting Firefox browser...")
+    driver = webdriver.Firefox(service=service, options=options)
+    print("✅ Firefox started successfully!")
+    
+    driver.maximize_window()
+    print("✅ Browser window maximized")
+    
+except Exception as e:
+    print(f"❌ Failed to start Firefox: {e}")
+    print("This might be due to:")
+    print("1. Firefox not installed")
+    print("2. Profile issues")
+    print("3. GeckoDriver compatibility")
+    print("Please install Firefox or check your profile settings.")
+    sys.exit(1)
 
 # Setup signal handlers for pause/stop controls
 setup_signal_handlers()
@@ -762,22 +814,22 @@ try:
     )
 
     # Get user input for row selection
-    start_row, max_rows = get_row_selection()
+    start_row, max_rows, total_numbers = get_row_selection()
     
     # Pause here to allow user adjust position
-    time.sleep(2)
-    loop_through_numbers(start_row, max_rows)    
+    time.sleep(1)
+    loop_through_numbers(start_row, max_rows, total_numbers)    
     # loop_through_all_chats_with_scroll()
 
 except:
     print("WhatsApp Web header not found - already logged in")
     
     # Get user input for row selection
-    start_row, max_rows = get_row_selection()
+    start_row, max_rows, total_numbers = get_row_selection()
     
     # Click the Groups filter button
     time.sleep(2)
-    loop_through_numbers(start_row, max_rows)
+    loop_through_numbers(start_row, max_rows, total_numbers)
     # loop_through_all_chats_with_scroll()
 
 # Wait for WhatsApp to load completely
