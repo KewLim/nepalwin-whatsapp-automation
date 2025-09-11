@@ -119,7 +119,7 @@ def get_row_selection():
     try:
         # First, show how many numbers are available
         try:
-            with open("phone_number.txt", "r") as f:
+            with open("TXT File/phone_number.txt", "r") as f:
                 total_numbers = sum(1 for line in f if line.strip() and re.match(r'^\+?\d{10,15}$', line.strip().replace(" ", "").replace("-", "")))
         except FileNotFoundError:
             print("❌ phone_number.txt not found")
@@ -197,7 +197,7 @@ def click_group_filter():
 def load_exclude_words():
     """Load exclude words from exclude_words.txt file"""
     try:
-        with open('exclude_words.txt', 'r', encoding='utf-8') as f:
+        with open('TXT File/exclude_words.txt', 'r', encoding='utf-8') as f:
             words = [line.strip() for line in f.readlines() if line.strip()]
             return words if words else ["NepalWin", "NPW", "Blocked"]
     except FileNotFoundError:
@@ -259,7 +259,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
     
     # Add timestamp to not_in_group.txt at start of processing
     try:
-        with open("not_in_group.txt", "a", encoding="utf-8") as f:
+        with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
             # GMT+7 timezone (7 hours ahead of UTC)
             gmt_plus_7 = datetime.utcnow() + timedelta(hours=7)
             timestamp = gmt_plus_7.strftime("%Y-%m-%d %H:%M:%S GMT+7")
@@ -271,7 +271,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
     try:
         # Load phone numbers from file
         all_phone_numbers = []
-        with open("phone_number.txt", "r") as f:
+        with open("TXT File/phone_number.txt", "r") as f:
             for line in f:
                 number = line.strip()
                 if number and re.match(r'^\+?\d{10,15}$', number.replace(" ", "").replace("-", "")):
@@ -377,7 +377,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     )
                     if no_result.is_displayed():
                         print(f"\033[91m[WARN]\033[0m No chat found for {number}")
-                        with open("not_in_group.txt", "a", encoding="utf-8") as f:
+                        with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
                             f.write(f"{number}\n")
                         print(f"\033[93m[RECORDED]\033[0m Number \033[93m{number}\033[0m saved to not_in_group.txt")
                         failed_numbers += 1
@@ -432,7 +432,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                 except Exception:
                     print(f"\033[91m[WARN]\033[0m 'Groups in common' not found for {number}")
                     # Record the number in not_in_group.txt
-                    with open("not_in_group.txt", "a", encoding="utf-8") as f:
+                    with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
                         f.write(f"{number}\n")
                     print(f"\033[93m[RECORDED]\033[0m Number {number} saved to not_in_group.txt")
                     failed_numbers += 1
@@ -458,7 +458,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
         
         # Count numbers in not_in_group.txt file
         try:
-            with open("not_in_group.txt", "r", encoding="utf-8") as f:
+            with open("TXT File/not_in_group.txt", "r", encoding="utf-8") as f:
                 not_found_count = len([line for line in f if line.strip()])
             print(f"📝 Numbers recorded in not_in_group.txt: {not_found_count}")
         except FileNotFoundError:
@@ -469,7 +469,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
         
         # Add completion timestamp to not_in_group.txt
         try:
-            with open("not_in_group.txt", "a", encoding="utf-8") as f:
+            with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
                 # GMT+7 timezone (7 hours ahead of UTC)
                 gmt_plus_7 = datetime.utcnow() + timedelta(hours=7)
                 timestamp = gmt_plus_7.strftime("%Y-%m-%d %H:%M:%S GMT+7")
@@ -747,7 +747,7 @@ def send_message_from_file(message_index=0):
 def load_message_from_file():
     """Load and parse message content from description.txt file"""
     try:
-        filename = "description.txt"
+        filename = "TXT File/description.txt"
         
         with open(filename, 'r', encoding='utf-8') as file:
             content = file.read().strip()
@@ -894,7 +894,6 @@ try:
 except Exception as e:
     print(f"⚠️ Error closing browser: {e}")
 
-print("\n👋 Script execution completed!")
 sys.exit(0)
 
 

@@ -54,7 +54,7 @@ class WhatsAppAuto(QDialog):
     def load_description_file(self):
         """Load content from description.txt"""
         try:
-            with open('description.txt', 'r', encoding='utf-8') as f:
+            with open('TXT File/description.txt', 'r', encoding='utf-8') as f:
                 return f.read()
         except FileNotFoundError:
             return ""
@@ -62,7 +62,7 @@ class WhatsAppAuto(QDialog):
     def save_description_file(self, content, dialog):
         """Save content to description.txt"""
         try:
-            with open('description.txt', 'w', encoding='utf-8') as f:
+            with open('TXT File/description.txt', 'w', encoding='utf-8') as f:
                 f.write(content)
             dialog.close()
         except Exception as e:
@@ -88,12 +88,15 @@ class WhatsAppAuto(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
         save_btn = QPushButton("Save")
+        cleanup_btn = QPushButton("Clean Numbers")
         cancel_btn = QPushButton("Cancel")
         
         save_btn.clicked.connect(lambda: self.save_phone_numbers(text_edit.toPlainText(), dialog))
+        cleanup_btn.clicked.connect(lambda: self.cleanup_phone_numbers(text_edit))
         cancel_btn.clicked.connect(dialog.close)
         
         button_layout.addWidget(save_btn)
+        button_layout.addWidget(cleanup_btn)
         button_layout.addWidget(cancel_btn)
         layout.addLayout(button_layout)
         
@@ -103,15 +106,37 @@ class WhatsAppAuto(QDialog):
     def load_phone_numbers(self):
         """Load phone numbers from phone_number.txt"""
         try:
-            with open('phone_number.txt', 'r', encoding='utf-8') as f:
+            with open('TXT File/phone_number.txt', 'r', encoding='utf-8') as f:
                 return f.read()
         except FileNotFoundError:
             return ""
 
+    def cleanup_phone_numbers(self, text_edit):
+        """Clean phone numbers by removing +, spaces, and dashes"""
+        import re
+        current_text = text_edit.toPlainText()
+        lines = current_text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            if line.strip():
+                # Remove +, spaces, dashes, and any other non-digit characters except newlines
+                cleaned_number = re.sub(r'[^\d]', '', line.strip())
+                if cleaned_number:  # Only add if there are digits left
+                    cleaned_lines.append(cleaned_number)
+        
+        # Update the text editor with cleaned numbers
+        cleaned_text = '\n'.join(cleaned_lines)
+        text_edit.setPlainText(cleaned_text)
+        
+        # Show count of cleaned numbers
+        count = len(cleaned_lines)
+        print(f"✅ Cleaned {count} phone numbers (removed +, spaces, dashes)")
+
     def save_phone_numbers(self, content, dialog):
         """Save phone numbers to phone_number.txt"""
         try:
-            with open('phone_number.txt', 'w', encoding='utf-8') as f:
+            with open('TXT File/phone_number.txt', 'w', encoding='utf-8') as f:
                 f.write(content)
             dialog.close()
         except Exception as e:
@@ -154,11 +179,11 @@ class WhatsAppAuto(QDialog):
         """Run the WhatsApp automation script"""
         try:
             # Check if required files exist
-            if not os.path.exists('description.txt'):
+            if not os.path.exists('TXT File/description.txt'):
                 QMessageBox.warning(None, "Warning", "description.txt not found! Please add message text first.")
                 return
             
-            if not os.path.exists('phone_number.txt'):
+            if not os.path.exists('TXT File/phone_number.txt'):
                 QMessageBox.warning(None, "Warning", "phone_number.txt not found! Please add phone numbers first.")
                 return
             
@@ -238,7 +263,7 @@ class WhatsAppAuto(QDialog):
     def load_exclude_words(self):
         """Load exclude words from exclude_words.txt"""
         try:
-            with open('exclude_words.txt', 'r', encoding='utf-8') as f:
+            with open('TXT File/exclude_words.txt', 'r', encoding='utf-8') as f:
                 return f.read().strip()
         except FileNotFoundError:
             # Return default exclude words if file doesn't exist
@@ -260,7 +285,7 @@ class WhatsAppAuto(QDialog):
 
     def save_exclude_words_to_file(self, content):
         """Save exclude words to file"""
-        with open('exclude_words.txt', 'w', encoding='utf-8') as f:
+        with open('TXT File/exclude_words.txt', 'w', encoding='utf-8') as f:
             f.write(content)
 
 if __name__ == '__main__':
