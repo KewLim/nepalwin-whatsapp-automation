@@ -21,6 +21,14 @@ import signal
 import sys
 import threading
 
+# Import group name extractor
+try:
+    from tools.extract_group_names import extract_all_group_names
+    GROUP_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    GROUP_EXTRACTOR_AVAILABLE = False
+    print("⚠️  Warning: Group name extractor not available")
+
 # Try to import keyboard, make it optional
 try:
     import keyboard
@@ -44,7 +52,7 @@ def signal_handler(signum, frame):
         driver.quit()
     except:
         pass
-    sys.exit(0)
+    os._exit(0)  # Force immediate exit
 
 def toggle_pause():
     """Toggle pause state when Ctrl+P is pressed"""
@@ -110,24 +118,72 @@ def wait_for_user_input(message="Press ENTER to continue..."):
         input(message)
         print("Continuing...")
     except KeyboardInterrupt:
-        print("\nOperation cancelled by user")
-        return False
+        print("\n🛑 Script interrupted by user - Exiting completely...")
+        try:
+            driver.quit()
+        except:
+            pass
+        sys.exit(0)
     return True
 
-def get_row_selection():
-    """Get user input for row selection from phone_number.txt"""
-    try:
-        # First, show how many numbers are available
+def get_action_selection():
+    """Get user input for what action to perform"""
+    print("\n" + "="*60)
+    print("🎯 WHATSAPP AUTOMATION - SELECT ACTION")
+    print("="*60)
+    print("1. 📱 Send messages to phone numbers")
+    print("2. 📋 Extract all group chat names") 
+    print("3. ❌ Exit")
+    print("="*60)
+    
+    while True:
         try:
-            with open("TXT File/phone_number.txt", "r") as f:
-                total_numbers = sum(1 for line in f if line.strip() and re.match(r'^\+?\d{10,15}$', line.strip().replace(" ", "").replace("-", "")))
+            choice = input("Enter your choice (1-3): ").strip()
+            if choice == "1":
+                return "send_messages"
+            elif choice == "2":
+                return "extract_groups"
+            elif choice == "3":
+                return "exit"
+            else:
+                print("❌ Invalid choice. Please enter 1, 2, or 3.")
+        except KeyboardInterrupt:
+            print("\n🛑 Script interrupted by user - Exiting completely...")
+            try:
+                driver.quit()
+            except:
+                pass
+            sys.exit(0)
+        except Exception as e:
+            print(f"❌ Error getting input: {e}")
+            return "exit"
+
+def get_row_selection():
+    """Get user input for row selection from phone_number.txt (supports phone numbers and group names)"""
+    try:
+        # First, show how many entries are available (phones + groups)
+        try:
+            with open("TXT File/phone_number.txt", "r", encoding="utf-8") as f:
+                phone_count = 0
+                group_count = 0
+                for line in f:
+                    entry = line.strip()
+                    if entry:
+                        # Check if it's a phone number
+                        cleaned_entry = entry.replace(" ", "").replace("-", "").replace("+", "")
+                        if re.match(r'^\d{10,15}$', cleaned_entry):
+                            phone_count += 1
+                        else:
+                            group_count += 1
+                            
+                total_numbers = phone_count + group_count
         except FileNotFoundError:
             print("❌ phone_number.txt not found")
             return None, None, 0
         
-        print(f"\n📊 Total valid phone numbers in file: {total_numbers}")
+        print(f"\n📊 Total entries in file: {total_numbers} ({phone_count} phones + {group_count} groups)")
         print("\n🎯 Row Selection Options:")
-        print("1. Process all numbers (default)")
+        print("1. Process all entries (default)")
         print("2. Start from specific row")
         print("3. Process specific range")
         
@@ -174,8 +230,12 @@ def get_row_selection():
                 return None, None, total_numbers
                 
         except KeyboardInterrupt:
-            print("\nOperation cancelled by user")
-            return None, None, total_numbers
+            print("\n🛑 Script interrupted by user - Exiting completely...")
+            try:
+                driver.quit()
+            except:
+                pass
+            sys.exit(0)
             
     except Exception as e:
         print(f"Error in row selection: {e}")
@@ -247,7 +307,7 @@ def click_non_excluded_names(driver, exclude_words=None):
 
 
 def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
-    """Loop through phone numbers from phone_number.txt and paste into search box
+    """Loop through phone numbers AND group chat names from phone_number.txt and search for them
     
     Args:
         start_row (int): Starting row number (1-based index, None = start from beginning)
@@ -269,48 +329,78 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
         print(f"⚠️ Could not write timestamp: {e}")
     
     try:
-        # Load phone numbers from file
-        all_phone_numbers = []
-        with open("TXT File/phone_number.txt", "r") as f:
-            for line in f:
-                number = line.strip()
-                if number and re.match(r'^\+?\d{10,15}$', number.replace(" ", "").replace("-", "")):
-                    all_phone_numbers.append(number.replace(" ", "").replace("-", ""))
+        # Load phone numbers AND group chat names from file
+        all_entries = []
+        phone_count = 0
+        group_count = 0
         
-        if not all_phone_numbers:
-            print("❌ No valid phone numbers found in phone_number.txt")
+        with open("TXT File/phone_number.txt", "r", encoding="utf-8") as f:
+            for line in f:
+                entry = line.strip()
+                if entry:
+                    # Check if it's a phone number (digits only, with optional + and spaces/dashes)
+                    cleaned_entry = entry.replace(" ", "").replace("-", "").replace("+", "")
+                    if re.match(r'^\d{10,15}$', cleaned_entry):
+                        # It's a phone number
+                        all_entries.append({
+                            'type': 'phone',
+                            'value': cleaned_entry,
+                            'original': entry
+                        })
+                        phone_count += 1
+                    else:
+                        # It's likely a group chat name
+                        all_entries.append({
+                            'type': 'group',
+                            'value': entry,
+                            'original': entry
+                        })
+                        group_count += 1
+        
+        if not all_entries:
+            print("❌ No valid entries found in phone_number.txt")
             return False
+        
+        print(f"📊 Loaded {phone_count} phone numbers and {group_count} group chat names")
         
         # Apply row filtering
         if start_row is not None:
             start_index = max(0, start_row - 1)  # Convert to 0-based index
-            all_phone_numbers = all_phone_numbers[start_index:]
+            all_entries = all_entries[start_index:]
             
         if max_rows is not None:
-            all_phone_numbers = all_phone_numbers[:max_rows]
+            all_entries = all_entries[:max_rows]
             
-        phone_numbers = all_phone_numbers
+        entries_to_process = all_entries
         
-        if not phone_numbers:
-            print("❌ No phone numbers found in specified range")
+        if not entries_to_process:
+            print("❌ No entries found in specified range")
             return False
         
         range_info = ""
         if start_row or max_rows:
             start_display = start_row if start_row else 1
-            end_display = (start_display + len(phone_numbers) - 1) if phone_numbers else start_display
+            end_display = (start_display + len(entries_to_process) - 1) if entries_to_process else start_display
             range_info = f" (rows {start_display}-{end_display})"
             
-        print(f"📞 Loaded {len(phone_numbers)} phone numbers from file{range_info}")
+        print(f"📞 Processing {len(entries_to_process)} entries (phones + groups) from file{range_info}")
         
-        for row_index, number in enumerate(phone_numbers, start=1):
+        for row_index, entry in enumerate(entries_to_process, start=1):
             # Check for pause/stop before processing each number
             check_script_control()
             
             # Calculate actual row number considering start_row offset
             actual_row = (start_row if start_row else 1) + row_index - 1
             
-            print(f"🔍 Processing number: {number}")
+            # Extract the search value and type
+            search_value = entry['value']
+            entry_type = entry['type']
+            original_entry = entry['original']
+            
+            if entry_type == 'phone':
+                print(f"🔍 Processing phone number: {search_value}")
+            else:
+                print(f"🔍 Processing group chat: {search_value}")
             
             try:
                 # Multiple search box selectors using EC.any_of
@@ -330,7 +420,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     )
                     # print(f"✅ Found search box")
                 except TimeoutException:
-                    print(f"❌ Could not find search box for number {number}")
+                    print(f"❌ Could not find search box for entry {search_value}")
                     continue
 
                 # Scroll into view and click
@@ -343,7 +433,7 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                 time.sleep(0.5)
                 
                 # Copy to clipboard first
-                pyperclip.copy(number)
+                pyperclip.copy(search_value)
                 time.sleep(0.3)
                 
                 # Clear and paste using ActionChains
@@ -362,9 +452,9 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     actions.key_down(Keys.CONTROL).send_keys("v").key_up(Keys.CONTROL)  # Paste
                 
                 actions.perform()
-                time.sleep(1)
+                time.sleep(.5)
                 
-                print(f"\033[92m[APPROVED]\033[0m Pasted number into search: {number}")
+                print(f"\033[92m[APPROVED]\033[0m Pasted entry into search: {search_value}")
 
 
                 # --- Check for "No chats, contacts or messages found" ---
@@ -376,10 +466,10 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                         ))
                     )
                     if no_result.is_displayed():
-                        print(f"\033[91m[WARN]\033[0m No chat found for {number}")
+                        print(f"\033[91m[WARN]\033[0m No chat found for {search_value}")
                         with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
-                            f.write(f"{number}\n")
-                        print(f"\033[93m[RECORDED]\033[0m Number \033[93m{number}\033[0m saved to not_in_group.txt")
+                            f.write(f"{original_entry}\n")
+                        print(f"\033[93m[RECORDED]\033[0m Entry \033[93m{search_value}\033[0m saved to not_in_group.txt")
                         failed_numbers += 1
                         continue  # jump to next number in your loop
 
@@ -388,63 +478,222 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
                     pass
                 
                 # Verify the content was pasted
-                time.sleep(0.5)
+                # time.sleep(0.5)
                 current_value = search_box.get_attribute('value') or driver.execute_script("return arguments[0].innerText;", search_box)
-                if number not in str(current_value):
+                if search_value not in str(current_value):
                     print(f"⚠️ Paste may have failed, trying direct input...")
                     # Fallback: direct character input
                     search_box.clear()
-                    for char in number:
+                    for char in search_value:
                         search_box.send_keys(char)
                         time.sleep(0.05)
                 
-                try:
-                    # Wait for the "Groups in common" div to appear
-                    groups_in_common = WebDriverWait(driver, 20, poll_frequency=0.2).until(
-                        EC.presence_of_element_located((
-                            By.XPATH,
-                            "//div[@role='listitem' and contains(., 'Groups in common')]"
-                        ))
-                    )
-
-                    # Wait for the next sibling div (the chat after 'Groups in common')
-                    next_chat = WebDriverWait(driver, 20, poll_frequency=0.2).until(
-                        EC.element_to_be_clickable((
-                            By.XPATH,
-                            "//div[@role='listitem' and contains(., 'Groups in common')]/following-sibling::div[1]"
-                        ))
-                    )
-
-                    # Scroll into view and click
-                    driver.execute_script("arguments[0].scrollIntoView();", next_chat)
-                    next_chat.click()
-                    print("[INFO] Clicked chat after 'Groups in common'")
-                    #time.sleep(2)
+                # Different handling based on entry type
+                if entry_type == 'group':
+                    # For group chats (alphabetic entries): Priority order - Groups in common > Chats > Contact
+                    groups_common_success = False
+                    time.sleep(.5)
                     
-                    # Send message from file
-                    print(f"\033[1;32m[{actual_row}/{total_numbers}]\033[0m [INFO] Sending message to chat for number {number}")
-                    # test_send_message()
-                    send_message_from_file()
-                    successful_numbers += 1
+                    # Check what sections are available
+                    groups_in_common_found = False
+                    chats_found = False
+                    contact_found = False
                     
-                    time.sleep(1)
+                    try:
+                        # Check for "Groups in common" section
+                        driver.find_element(By.XPATH, "//div[@role='listitem' and contains(., 'Groups in common')]")
+                        groups_in_common_found = True
+                        print("[INFO] Found 'Groups in common' section")
+                    except:
+                        pass
+                    
+                    try:
+                        # Check for "Chats" section
+                        driver.find_element(By.XPATH, "//div[@role='listitem' and contains(., 'Chats')]")
+                        chats_found = True
+                        print("[INFO] Found 'Chats' section")
+                    except:
+                        pass
+                    
+                    try:
+                        # Check for "Contact" section
+                        driver.find_element(By.XPATH, "//div[@role='listitem' and contains(., 'Contact')]")
+                        contact_found = True
+                        print("[INFO] Found 'Contact' section")
+                    except:
+                        pass
+                    
+                    # If ONLY 'Contact' section found, skip immediately
+                    if contact_found and not groups_in_common_found and not chats_found:
+                        print(f"[WARN] Only 'Contact' section found for: {search_value} - skipping (individual contact only)")
+                        # Record the entry in not_in_group.txt
+                        with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{original_entry}\n")
+                        print(f"\033[93m[RECORDED]\033[0m Contact-only entry {search_value} saved to not_in_group.txt")
+                        failed_numbers += 1
+                        continue
+                    
+                    # Priority 1: Try "Groups in common" first
+                    if groups_in_common_found and not groups_common_success:
+                        try:
+                            print("[INFO] Trying 'Groups in common' (Priority 1)")
+                            # Wait for the next sibling div (the chat after 'Groups in common')
+                            next_chat = WebDriverWait(driver, 2, poll_frequency=0.2).until(
+                                EC.element_to_be_clickable((
+                                    By.XPATH,
+                                    "//div[@role='listitem' and contains(., 'Groups in common')]/following-sibling::div[1]"
+                                ))
+                            )
+                            
+                            # Scroll into view and click
+                            driver.execute_script("arguments[0].scrollIntoView();", next_chat)
+                            next_chat.click()
+                            print("[SUCCESS] Clicked chat after 'Groups in common'")
+                            groups_common_success = True
+                            
+                        except Exception as e:
+                            print(f"[INFO] 'Groups in common' click failed: {e}")
+                    
+                    # Priority 2: Try "Chats" if Groups in common failed
+                    if chats_found and not groups_common_success:
+                        try:
+                            print("[INFO] Trying 'Chats' section (Priority 2)")
+                            # Try to find chat under "Chats" section
+                            chat_found = WebDriverWait(driver, 2, poll_frequency=0.1).until(
+                                EC.element_to_be_clickable((
+                                    By.XPATH,
+                                    "//div[@role='listitem' and contains(., 'Chats')]/following-sibling::div[1]"
+                                ))
+                            )
+                            
+                            # Click on the found chat
+                            driver.execute_script("arguments[0].scrollIntoView();", chat_found)
+                            time.sleep(0.5)
+                            chat_found.click()
+                            print(f"[INFO] Clicked on chat under 'Chats': {search_value}")
+                            
+                            # Wait for chat to load and verify it's a group chat
+                            time.sleep(1)
+                            is_group_chat = False
+                            
+                            try:
+                                # Method 1: Check for group info icon (more reliable)
+                                group_info_selectors = [
+                                    "div[data-testid='conversation-info-header-group']",
+                                    "span[data-icon='group']",
+                                    "div[data-testid='group-info']",
+                                    "span[title*='participant']",
+                                    "span[title*='member']"
+                                ]
+                                
+                                for selector in group_info_selectors:
+                                    if driver.find_elements(By.CSS_SELECTOR, selector):
+                                        is_group_chat = True
+                                        print("[INFO] Confirmed: This is a group chat (found group indicator)")
+                                        break
+                                
+                                # Method 2: Check chat header text for group indicators
+                                if not is_group_chat:
+                                    try:
+                                        header_elements = driver.find_elements(By.CSS_SELECTOR, "header span, header div")
+                                        for element in header_elements:
+                                            header_text = element.text.lower()
+                                            if any(indicator in header_text for indicator in ['participant', 'member', 'you, ', ', you']):
+                                                is_group_chat = True
+                                                print("[INFO] Confirmed: This is a group chat (found participant info)")
+                                                break
+                                    except:
+                                        pass
+                                
+                                # Method 3: Check for group-specific elements
+                                if not is_group_chat:
+                                    try:
+                                        group_elements = driver.find_elements(By.XPATH, "//*[contains(text(), 'Group') or contains(text(), 'Admin') or contains(@aria-label, 'Group')]")
+                                        if group_elements:
+                                            is_group_chat = True
+                                            print("[INFO] Confirmed: This is a group chat (found group elements)")
+                                    except:
+                                        pass
+                                        
+                            except Exception as e:
+                                print(f"[WARN] Could not verify if chat is a group: {e}")
+                            
+                            if is_group_chat:
+                                print(f"[SUCCESS] Verified group chat under 'Chats' for: {search_value}")
+                                groups_common_success = True
+                            else:
+                                print(f"[WARN] Chat under 'Chats' appears to be individual, not group for: {search_value}")
+                                # Go back to search to avoid sending to wrong chat
+                                search_box = driver.find_element(By.XPATH, "//div[@contenteditable='true'][@data-tab='3']")
+                                search_box.click()
+                                time.sleep(0.5)
+                                
+                        except Exception as e:
+                            print(f"[INFO] 'Chats' section failed: {e}")
+                    
+                    # Final check - if nothing worked, record as failed
+                    if not groups_common_success:
+                        print(f"\033[91m[WARN]\033[0m All sections failed for group: {search_value}")
+                        # Record the entry in not_in_group.txt
+                        with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{original_entry}\n")
+                        print(f"\033[93m[RECORDED]\033[0m Group {search_value} saved to not_in_group.txt")
+                        failed_numbers += 1
+                        continue
+                    
+                    # Send message if any method succeeded
+                    if groups_common_success:
+                        print(f"\033[1;32m[{actual_row}/{total_numbers}]\033[0m [INFO] Sending message to group: {search_value}")
+                        send_message_from_file()
+                        successful_numbers += 1
+                        time.sleep(.5)
+                        
+                else:
+                    # For phone numbers: use the original "Groups in common" logic
+                    try:
+                        # Wait for the "Groups in common" div to appear
+                        groups_in_common = WebDriverWait(driver, 20, poll_frequency=0.2).until(
+                            EC.presence_of_element_located((
+                                By.XPATH,
+                                "//div[@role='listitem' and contains(., 'Groups in common')]"
+                            ))
+                        )
 
-                except Exception:
-                    print(f"\033[91m[WARN]\033[0m 'Groups in common' not found for {number}")
-                    # Record the number in not_in_group.txt
-                    with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
-                        f.write(f"{number}\n")
-                    print(f"\033[93m[RECORDED]\033[0m Number {number} saved to not_in_group.txt")
-                    failed_numbers += 1
-                    continue
+                        # Wait for the next sibling div (the chat after 'Groups in common')
+                        next_chat = WebDriverWait(driver, 20, poll_frequency=0.2).until(
+                            EC.element_to_be_clickable((
+                                By.XPATH,
+                                "//div[@role='listitem' and contains(., 'Groups in common')]/following-sibling::div[1]"
+                            ))
+                        )
+
+                        # Scroll into view and click
+                        driver.execute_script("arguments[0].scrollIntoView();", next_chat)
+                        next_chat.click()
+                        print("[INFO] Clicked chat after 'Groups in common'")
+                        
+                        # Send message from file
+                        print(f"\033[1;32m[{actual_row}/{total_numbers}]\033[0m [INFO] Sending message to chat for phone: {search_value}")
+                        send_message_from_file()
+                        successful_numbers += 1
+                        time.sleep(.5)
+
+                    except Exception:
+                        print(f"\033[91m[WARN]\033[0m 'Groups in common' not found for phone: {search_value}")
+                        # Record the entry in not_in_group.txt
+                        with open("TXT File/not_in_group.txt", "a", encoding="utf-8") as f:
+                            f.write(f"{original_entry}\n")
+                        print(f"\033[93m[RECORDED]\033[0m Phone {search_value} saved to not_in_group.txt")
+                        failed_numbers += 1
+                        continue
 
                 
 
                 # Wait a bit before next number
-                time.sleep(1.5)
+                time.sleep(.7)
 
             except Exception as e:
-                print(f"⚠️ Could not process number {number}: {repr(e)}")
+                print(f"⚠️ Could not process entry {search_value}: {repr(e)}")
                 failed_numbers += 1
                 continue
 
@@ -453,19 +702,19 @@ def loop_through_numbers(start_row=None, max_rows=None, total_numbers=None):
         print("📊 PROCESSING COMPLETED!")
         print("="*60)
         print(f"✅ Successful messages sent: {successful_numbers}")
-        print(f"❌ Numbers not found/failed: {failed_numbers}")
-        print(f"📞 Total numbers processed: {successful_numbers + failed_numbers}")
+        print(f"❌ Entries not found/failed: {failed_numbers}")
+        print(f"📞 Total entries processed: {successful_numbers + failed_numbers}")
         
-        # Count numbers in not_in_group.txt file
+        # Count entries in not_in_group.txt file
         try:
             with open("TXT File/not_in_group.txt", "r", encoding="utf-8") as f:
                 not_found_count = len([line for line in f if line.strip()])
-            print(f"📝 Numbers recorded in not_in_group.txt: {not_found_count}")
+            print(f"📝 Entries recorded in not_in_group.txt: {not_found_count}")
         except FileNotFoundError:
-            print(f"📝 Numbers recorded in not_in_group.txt: 0")
+            print(f"📝 Entries recorded in not_in_group.txt: 0")
         
         print("="*60)
-        print("🎉 All numbers processed successfully!")
+        print("🎉 All entries processed successfully!")
         
         # Add completion timestamp to not_in_group.txt
         try:
@@ -867,24 +1116,56 @@ try:
         EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'x3nfvp2')]//h1[text()='WhatsApp Web']"))
     )
 
-    # Get user input for row selection
-    start_row, max_rows, total_numbers = get_row_selection()
+    # Get user action selection
+    action = get_action_selection()
     
-    # Pause here to allow user adjust position
-    time.sleep(1)
-    processing_result = loop_through_numbers(start_row, max_rows, total_numbers)    
-    # loop_through_all_chats_with_scroll()
+    if action == "exit":
+        print("👋 Exiting...")
+    elif action == "extract_groups":
+        if GROUP_EXTRACTOR_AVAILABLE:
+            print("\n🔄 Starting group name extraction...")
+            group_names = extract_all_group_names(driver, save_to_file=True)
+            if group_names:
+                print(f"✅ Successfully extracted {len(group_names)} group names!")
+            else:
+                print("❌ No group names found or extraction failed")
+        else:
+            print("❌ Group name extractor is not available")
+    elif action == "send_messages":
+        # Get user input for row selection
+        start_row, max_rows, total_numbers = get_row_selection()
+        
+        # Pause here to allow user adjust position
+        time.sleep(1)
+        processing_result = loop_through_numbers(start_row, max_rows, total_numbers)    
+        # loop_through_all_chats_with_scroll()
 
 except:
     print("WhatsApp Web header not found - already logged in")
     
-    # Get user input for row selection
-    start_row, max_rows, total_numbers = get_row_selection()
+    # Get user action selection
+    action = get_action_selection()
     
-    # Click the Groups filter button
-    time.sleep(2)
-    processing_result = loop_through_numbers(start_row, max_rows, total_numbers)
-    # loop_through_all_chats_with_scroll()
+    if action == "exit":
+        print("👋 Exiting...")
+    elif action == "extract_groups":
+        if GROUP_EXTRACTOR_AVAILABLE:
+            print("\n🔄 Starting group name extraction...")
+            group_names = extract_all_group_names(driver, save_to_file=True)
+            if group_names:
+                print(f"✅ Successfully extracted {len(group_names)} group names!")
+            else:
+                print("❌ No group names found or extraction failed")
+        else:
+            print("❌ Group name extractor is not available")
+    elif action == "send_messages":
+        # Get user input for row selection
+        start_row, max_rows, total_numbers = get_row_selection()
+        
+        # Click the Groups filter button
+        time.sleep(2)
+        processing_result = loop_through_numbers(start_row, max_rows, total_numbers)
+        # loop_through_all_chats_with_scroll()
 
 # Process complete - close browser
 try:
